@@ -1,0 +1,19 @@
+{
+  "model_dir": "/home/ubuntu/stephen/02-weight/depth-anything/DA3-SMALL",
+  "test_dir": "/home/ubuntu/stephen/01-code/Gen6D/test/5_piece",
+  "rgb_path": "/home/ubuntu/stephen/01-code/Gen6D/test/5_piece/rgb.png",
+  "depth_shape": [
+    1,
+    504,
+    378
+  ],
+  "depth_range": [
+    0.3373403251171112,
+    1.9809529781341553
+  ],
+  "conf_range": [
+    1.0000001192092896,
+    1.8192481994628906
+  ],
+  "output_dir": "/home/ubuntu/stephen/01-code/Gen6D/test/5_piece/da3_output"
+}
