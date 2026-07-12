@@ -59,6 +59,8 @@ def depth_rgb_to_pointcloud(
     x = (u_coords[valid] - cx) * z / fx
     y = (v_coords[valid] - cy) * z / fy
     points = np.stack([x, y, z], axis=-1)
+    # Camera coords: Y down, Z forward → GLB/Three.js: Y up
+    points[:, 1] *= -1
 
     colors = rgb[valid]
     if colors.dtype != np.uint8:

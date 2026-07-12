@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -60,30 +61,46 @@ def create_app(model_dir: str, device: str) -> FastAPI:
         intrinsics: Annotated[str | None, Form(description="相机内参 JSON，含 cam_K 字段")] = None,
     ):
         try:
-            rgb_image = Image.open(rgb.file).convert("RGB")
+            rgb_bytes = await rgb.read()
+            rgb_image = Image.open(io.BytesIO(rgb_bytes)).convert("RGB")
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid RGB image: {exc}") from exc
 
+        rgb_suffix = Path(rgb.filename or "rgb.png").suffix or ".png"
+
         intrinsics_arr = None
+        intrinsics_data = None
         if intrinsics:
             try:
-                intrinsics_arr = load_intrinsics_from_dict(json.loads(intrinsics))
+                intrinsics_data = json.loads(intrinsics)
+                intrinsics_arr = load_intrinsics_from_dict(intrinsics_data)
             except Exception as exc:
                 raise HTTPException(status_code=400, detail=f"Invalid intrinsics JSON: {exc}") from exc
 
         sensor_depth = None
         depth_scale = 1.0
+        depth_bytes = None
         if depth is not None:
             try:
-                depth_image = Image.open(depth.file)
-                if intrinsics:
-                    depth_scale = float(json.loads(intrinsics).get("depth_scale", 1.0))
+                depth_bytes = await depth.read()
+                depth_image = Image.open(io.BytesIO(depth_bytes))
+                if intrinsics_data:
+                    depth_scale = float(intrinsics_data.get("depth_scale", 1.0))
                 sensor_depth = load_sensor_depth_from_image(depth_image, depth_scale)
             except Exception as exc:
                 raise HTTPException(status_code=400, detail=f"Invalid depth image: {exc}") from exc
 
         try:
-            result = service.predict(rgb_image, intrinsics=intrinsics_arr, sensor_depth=sensor_depth)
+            result = service.predict(
+                rgb_image,
+                intrinsics=intrinsics_arr,
+                sensor_depth=sensor_depth,
+                source="api",
+                depth_bytes=depth_bytes,
+                intrinsics_data=intrinsics_data,
+                rgb_bytes=rgb_bytes,
+                rgb_suffix=rgb_suffix,
+            )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -97,6 +114,12 @@ def create_app(model_dir: str, device: str) -> FastAPI:
             response["images"]["sensor_depth_vis"] = base64.b64encode(
                 image_to_png_bytes(result.sensor_depth_vis)
             ).decode()
+        if result.fused_depth_vis is not None:
+            response["images"]["fused_depth_vis"] = base64.b64encode(
+                image_to_png_bytes(result.fused_depth_vis)
+            ).decode()
+        if result.fusion is not None:
+            response["fusion"] = result.fusion
         if result.pointcloud_glb is not None:
             response["pointcloud"] = {
                 "point_count": result.point_count,

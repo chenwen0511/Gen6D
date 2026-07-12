@@ -7,12 +7,17 @@ import json
 from pathlib import Path
 
 import gradio as gr
-import numpy as np
+from PIL import Image
 
-from src.depth.service import DEFAULT_MODEL_DIR, DepthService, load_intrinsics_from_dict
+from src.depth.service import (
+    DEFAULT_MODEL_DIR,
+    DepthService,
+    load_intrinsics_from_dict,
+    load_sensor_depth_from_image,
+)
 
 
-def parse_camera_json_file(file_path: str | None) -> tuple[np.ndarray | None, float]:
+def parse_camera_json_file(file_path: str | None) -> tuple:
     if file_path is None:
         return None, 1.0
 
@@ -30,34 +35,42 @@ def parse_camera_json_file(file_path: str | None) -> tuple[np.ndarray | None, fl
 
 
 def build_ui(service: DepthService) -> gr.Blocks:
-    def run_upload(rgb, depth, intrinsics_file):
+    def run_upload(rgb, depth_file, intrinsics_file):
         if rgb is None:
             raise gr.Error("请上传 RGB 图像")
 
         intrinsics, depth_scale = parse_camera_json_file(intrinsics_file)
+        intrinsics_data = None
+        if intrinsics_file is not None:
+            with Path(intrinsics_file).open(encoding="utf-8") as f:
+                intrinsics_data = json.load(f)
 
         sensor_depth = None
-        if depth is not None:
-            arr = depth.astype(np.float32)
-            if arr.ndim == 3:
-                arr = arr[..., 0]
-            arr[arr == 0] = np.nan
-            sensor_depth = arr / depth_scale
+        if depth_file is not None:
+            try:
+                sensor_depth = load_sensor_depth_from_image(
+                    Image.open(depth_file), depth_scale
+                )
+            except Exception as exc:
+                raise gr.Error(f"无法读取深度图: {exc}") from exc
 
-        result = service.predict(rgb, intrinsics=intrinsics, sensor_depth=sensor_depth)
-        summary = result.to_summary()
-        if result.pointcloud_glb is None:
-            summary["pointcloud"] = "未生成（需要上传相机内参，或等待模型输出内参）"
-        else:
-            summary["pointcloud_glb"] = str(result.pointcloud_glb)
-            summary["pointcloud_ply"] = str(result.pointcloud_ply)
-        info = json.dumps(summary, indent=2, ensure_ascii=False)
+        result = service.predict(
+            rgb,
+            intrinsics=intrinsics,
+            sensor_depth=sensor_depth,
+            source="ui",
+            depth_path=depth_file,
+            intrinsics_path=intrinsics_file,
+            intrinsics_data=intrinsics_data,
+        )
+        info = json.dumps(result.to_summary(), indent=2, ensure_ascii=False)
 
         glb_file = str(result.pointcloud_glb) if result.pointcloud_glb else None
         ply_file = str(result.pointcloud_ply) if result.pointcloud_ply else None
         return (
             result.processed_rgb,
             result.pred_depth_vis,
+            result.fused_depth_vis,
             result.conf_vis,
             result.sensor_depth_vis,
             glb_file,
@@ -69,15 +82,20 @@ def build_ui(service: DepthService) -> gr.Blocks:
     with gr.Blocks(title="Gen6D Depth Demo") as demo:
         gr.Markdown(
             "# Gen6D 深度估计演示\n"
-            "上传 RGB 图像（可选传感器深度 + 相机内参文件）进行推理。"
-            "点云默认降采样至 5 万点，支持浏览器预览与 GLB/PLY 下载。"
+            "上传 RGB + 传感器深度 PNG（uint16 原始文件，勿上传伪彩色图）+ 相机内参，"
+            "执行 DA3 推理与深度融合。"
+            "融合点云默认降采样至 5 万点，支持浏览器预览与 GLB/PLY 下载。"
         )
 
         with gr.Row():
             rgb_input = gr.Image(type="pil", label="RGB 图像", height=320)
-            depth_input = gr.Image(type="numpy", label="传感器深度（可选）", height=320)
+            depth_input = gr.File(
+                label="传感器深度 PNG（uint16 原始深度）",
+                file_types=[".png"],
+                type="filepath",
+            )
             intrinsics_input = gr.File(
-                label="相机内参 JSON（点云推荐上传）",
+                label="相机内参 JSON（融合/点云必需）",
                 file_types=[".json"],
                 type="filepath",
             )
@@ -88,18 +106,21 @@ def build_ui(service: DepthService) -> gr.Blocks:
         with gr.Row():
             with gr.Column():
                 gr.Markdown("**预处理后 RGB**")
-                out_rgb = gr.Image(show_label=False, height=360, interactive=False)
+                out_rgb = gr.Image(show_label=False, height=320, interactive=False)
             with gr.Column():
                 gr.Markdown("**预测深度**")
-                out_pred = gr.Image(show_label=False, height=360, interactive=False)
+                out_pred = gr.Image(show_label=False, height=320, interactive=False)
+            with gr.Column():
+                gr.Markdown("**融合深度**")
+                out_fused = gr.Image(show_label=False, height=320, interactive=False)
             with gr.Column():
                 gr.Markdown("**置信度**")
-                out_conf = gr.Image(show_label=False, height=360, interactive=False)
+                out_conf = gr.Image(show_label=False, height=320, interactive=False)
             with gr.Column():
                 gr.Markdown("**传感器深度**")
-                out_sensor = gr.Image(show_label=False, height=360, interactive=False)
+                out_sensor = gr.Image(show_label=False, height=320, interactive=False)
 
-        gr.Markdown("### 3D 点云")
+        gr.Markdown("### 3D 点云（融合深度）")
         with gr.Row():
             with gr.Column(scale=2):
                 gr.Markdown("**浏览器预览（GLB）**")
@@ -109,7 +130,7 @@ def build_ui(service: DepthService) -> gr.Blocks:
                 out_glb_download = gr.File(label="GLB 下载", interactive=False)
                 out_ply_download = gr.File(label="PLY 下载", interactive=False)
 
-        out_info = gr.Textbox(label="推理信息", lines=10)
+        out_info = gr.Textbox(label="推理信息", lines=12)
 
         upload_btn.click(
             run_upload,
@@ -117,6 +138,7 @@ def build_ui(service: DepthService) -> gr.Blocks:
             outputs=[
                 out_rgb,
                 out_pred,
+                out_fused,
                 out_conf,
                 out_sensor,
                 out_pointcloud_3d,
