@@ -1,0 +1,17 @@
+{
+  "bag": "/home/nvidia/stephen/HandleGrasping/data/bag_data/pot.bag",
+  "frame_index": 100,
+  "rgb_timestamp_ms": 1780383728506.3672,
+  "depth_timestamp_ms": 1780383728506.3494,
+  "depth_dtype": "uint16",
+  "depth_min": 0,
+  "depth_max": 65535,
+  "depth_scale": 0.0010000000474974513,
+  "outputs": {
+    "rgb": "/home/nvidia/stephen/HandleGrasping/data/pot/frame_100/rgb.png",
+    "depth_npy": "/home/nvidia/stephen/HandleGrasping/data/pot/frame_100/depth.npy",
+    "depth_raw_png": "/home/nvidia/stephen/HandleGrasping/data/pot/frame_100/depth_raw.png",
+    "depth_vis_png": "/home/nvidia/stephen/HandleGrasping/data/pot/frame_100/depth.png",
+    "camera_json": "/home/nvidia/stephen/HandleGrasping/data/pot/frame_100/camera.json"
+  }
+}

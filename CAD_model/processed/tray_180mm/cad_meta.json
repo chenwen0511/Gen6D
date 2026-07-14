@@ -1,0 +1,111 @@
+{
+  "object_id": "tray_180mm",
+  "source_file": "CAD_model/tray_180mm_centered_mesh_v2.ply",
+  "object_frame": {
+    "origin": "mesh bounding-box center after alignment",
+    "y_axis": "reel thickness / shortest PCA axis",
+    "disk_plane": "XZ (diameter ~180 mm in X and Z)",
+    "units_mesh_mm": "millimeters",
+    "units_mesh_m": "meters (scale 0.001 from mm mesh)"
+  },
+  "transforms": {
+    "translation_center_mm": [
+      -0.0,
+      -0.0,
+      -0.0
+    ],
+    "rotation_pca_row_major": [
+      [
+        0.63667015,
+        -0.04818393,
+        0.76962941
+      ],
+      [
+        0.09499165,
+        0.99534517,
+        -0.01626589
+      ],
+      [
+        -0.76526316,
+        0.08346438,
+        0.63828363
+      ]
+    ],
+    "post_rotation_recenter_mm": [
+      -0.433953,
+      0.473128,
+      -0.379804
+    ]
+  },
+  "raw_stats": {
+    "vertices": 13026,
+    "faces": 21428,
+    "bounds_min_mm": [
+      -86.9907,
+      -18.5863,
+      -90.0
+    ],
+    "bounds_max_mm": [
+      86.9907,
+      18.5863,
+      90.0
+    ],
+    "extent_mm": [
+      173.9814,
+      37.1726,
+      180.0
+    ],
+    "diameter_mm": 180.0,
+    "thickness_mm": 37.17257308959961,
+    "centroid_mm": [
+      -1.9686,
+      -0.6012,
+      0.6595
+    ],
+    "watertight": false,
+    "winding_consistent": true
+  },
+  "processed_stats_mm": {
+    "vertices": 13026,
+    "faces": 21436,
+    "bounds_min_mm": [
+      -91.7289,
+      -11.5898,
+      -91.124
+    ],
+    "bounds_max_mm": [
+      91.7289,
+      11.5898,
+      91.124
+    ],
+    "extent_mm": [
+      183.4578,
+      23.1796,
+      182.248
+    ],
+    "diameter_mm": 183.4577870599995,
+    "thickness_mm": 23.179551396239205,
+    "centroid_mm": [
+      -1.1398,
+      -0.3238,
+      1.4907
+    ],
+    "watertight": false,
+    "winding_consistent": true
+  },
+  "outputs": {
+    "mesh_mm_ply": "CAD_model/processed/tray_180mm/tray_180mm_object_frame_mm.ply",
+    "mesh_mm_obj": "CAD_model/processed/tray_180mm/tray_180mm_object_frame_mm.obj",
+    "mesh_m_ply": "CAD_model/processed/tray_180mm/tray_180mm_object_frame_m.ply",
+    "mesh_m_obj": "CAD_model/processed/tray_180mm/tray_180mm_object_frame_m.obj",
+    "surface_points_ply": "CAD_model/processed/tray_180mm/tray_180mm_cad_surface_4096.ply",
+    "surface_points_npy": "CAD_model/processed/tray_180mm/tray_180mm_cad_surface_4096.npy",
+    "surface_normals_npy": "CAD_model/processed/tray_180mm/tray_180mm_cad_normals_4096.npy"
+  },
+  "pem_defaults": {
+    "cad_mesh_mm": "CAD_model/processed/tray_180mm/tray_180mm_object_frame_mm.ply",
+    "cad_mesh_m": "CAD_model/processed/tray_180mm/tray_180mm_object_frame_m.obj",
+    "cad_points_npy": "CAD_model/processed/tray_180mm/tray_180mm_cad_surface_4096.npy",
+    "sample_points": 4096
+  }
+}

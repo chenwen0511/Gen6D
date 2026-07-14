@@ -13,7 +13,8 @@ class FusionConfig:
     conf_percentile: float = 20.0
     ransac_iterations: int = 1000
     ransac_threshold: float = 50.0
-    min_align_inlier_ratio: float = 0.30
+    ransac_threshold_rel: float = 0.12
+    min_align_inlier_ratio: float = 0.25
     min_valid_sensor_ratio: float = 0.05
     boundary_width: int = 5
     guided_radius: int = 8

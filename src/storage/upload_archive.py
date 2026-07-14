@@ -25,7 +25,7 @@ def create_session_dir(base_dir: Path = DEFAULT_SESSION_DIR) -> Path:
     return session_dir
 
 
-def _save_depth_png(depth_array: np.ndarray, path: Path) -> None:
+def save_depth_mm_png(depth_array: np.ndarray, path: Path) -> None:
     depth = depth_array.astype(np.float32)
     depth[~np.isfinite(depth) | (depth <= 0)] = 0
     depth_u16 = np.clip(depth, 0, 65535).astype(np.uint16)
@@ -55,7 +55,7 @@ def save_session_inputs(
     elif depth_bytes is not None:
         (session_dir / "depth.png").write_bytes(depth_bytes)
     elif depth_array is not None:
-        _save_depth_png(depth_array, session_dir / "depth.png")
+        save_depth_mm_png(depth_array, session_dir / "depth.png")
 
     if intrinsics_path is not None:
         shutil.copy2(intrinsics_path, session_dir / "camera.json")

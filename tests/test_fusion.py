@@ -58,6 +58,31 @@ def test_apply_scale_shift():
     assert np.isnan(out[1, 0])
 
 
+def test_blend_boundary_skips_invalid_sensor():
+    from src.fusion.smooth import blend_boundary
+
+    sensor = np.full((10, 10), np.nan, dtype=np.float32)
+    sensor[2:8, 2:8] = 500.0
+    metric = np.full((10, 10), 400.0, dtype=np.float32)
+    valid = np.isfinite(sensor) & (sensor > 0)
+    fused_raw = np.where(valid, sensor, metric).astype(np.float32)
+
+    out = blend_boundary(fused_raw, sensor, metric, valid)
+    assert np.isfinite(out).all()
+    assert (out[~valid] == 400.0).all()
+
+
+def test_median_ratio_fallback():
+    est = np.linspace(0.5, 2.0, 100, dtype=np.float32).reshape(10, 10)
+    sensor = 700.0 * est + np.random.default_rng(0).normal(0, 20, est.shape).astype(np.float32)
+    sensor = np.abs(sensor)
+    mask = np.ones_like(est, dtype=bool)
+    result = align_scale_shift(est, sensor, mask)
+    assert result.success
+    assert result.scale > 0
+    assert abs(result.scale - 700.0) < 100.0
+
+
 if __name__ == "__main__":
     test_build_valid_mask()
     test_align_scale_shift()

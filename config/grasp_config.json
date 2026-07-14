@@ -1,0 +1,38 @@
+{
+  "vlm": {
+    "api_url": "http://192.168.100.63:8000/v1/chat/completions",
+    "model": "qwen3-vl-4b",
+    "temperature": 0.2,
+    "timeout_s": 120
+  },
+  "sam3": {
+    "api_url": "http://192.168.100.220:18002/infer",
+    "prompt": "Plastic Reel Connected With Tape",
+    "threshold": 0.41,
+    "mask_threshold": 0.5,
+    "timeout_s": 300
+  },
+  "pem": {
+    "backend": "sam6d",
+    "api_url": "http://192.168.100.220:8004/infer",
+    "file_server_url": "http://192.168.100.220:8003",
+    "output_root": "/data/ubuntu/stephen/01-code/GenPose2/service_outputs",
+    "sam6d_output_root": "/home/mui/projects/smt/SAM-6D/SAM-6D/service_outputs",
+    "sam6d_file_server_url": "http://192.168.100.220:8005",
+    "timeout_s": 600,
+    "cad_path": "/home/ubuntu/stephen/01-code/Gen6D/CAD_model/tray_180mm_object_frame_mm.obj",
+    "seg_backend": "sam3",
+    "det_score_thresh": 0.3,
+    "depth_source": "fused"
+  },
+  "place": {
+    "marker_prompt": "the green square slot marker on the metal rack",
+    "sam3_threshold": 0.41,
+    "sam3_mask_threshold": 0.5,
+    "sam3_timeout_s": 300,
+    "depth_offset_mm": 100,
+    "height_offset_mm": 60,
+    "tray_diameter_mm": 180,
+    "tray_thickness_mm": 10
+  }
+}

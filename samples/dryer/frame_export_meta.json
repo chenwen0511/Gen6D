@@ -1,0 +1,9 @@
+{
+  "bag": "/home/nvidia/stephen/HandleGrasping/data/bag_data/dryer.bag",
+  "total_frames": 35,
+  "middle_frame_index": 17,
+  "depth_dtype": "uint16",
+  "depth_min": 0,
+  "depth_max": 65535,
+  "depth_scale": 0.0010000000474974513
+}

@@ -67,7 +67,7 @@ RGB ──► 传感器 ──► D_sensor ─────┘
 
 ### 3.3 数据示例
 
-测试数据：`test/5_piece/`、`test/wite_wall/`
+测试数据：`samples/5_piece/`、`samples/wite_wall/`
 
 ```
 rgb.png          # 640×480
@@ -310,7 +310,7 @@ UI / API 增加输出：
 
 ## 8. 对比实验计划
 
-在 `test/5_piece`、`test/wite_wall` 及更多料盘数据上：
+在 `samples/5_piece`、`samples/wite_wall` 及更多料盘数据上：
 
 | 实验组 | 深度来源 | 预期 |
 |--------|----------|------|

@@ -1,0 +1,25 @@
+{
+  "sample": "20260711_161432",
+  "rgb": "/data/ubuntu/stephen/01-code/Gen6D/test/20260711_161432/rgb.png",
+  "depth": "/data/ubuntu/stephen/01-code/Gen6D/test/20260711_161432/depth.png",
+  "camera": "/data/ubuntu/stephen/01-code/Gen6D/test/20260711_161432/camera.json",
+  "depth_scale": 1.0,
+  "fusion_status": "success",
+  "fusion_message": "深度融合完成",
+  "sensor_valid_ratio": 0.69619140625,
+  "hole_fill_ratio": 1.0,
+  "fused_black_ratio": 0.0,
+  "scale": 723.4130249023438,
+  "shift": 0.0,
+  "align_inlier_ratio": 0.4996434750081825,
+  "fusion": {
+    "status": "success",
+    "message": "深度融合完成",
+    "scale": 723.4130249023438,
+    "shift": 0.0,
+    "align_inlier_ratio": 0.4996434750081825,
+    "sensor_valid_ratio": 0.69619140625,
+    "fused_valid_ratio": 1.0,
+    "inpaint_ratio": 0.30380859375
+  }
+}

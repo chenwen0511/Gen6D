@@ -15,6 +15,7 @@ from src.depth.service import (
     load_intrinsics_from_dict,
     load_sensor_depth_from_image,
 )
+from src.grasp.ui import build_point_sam_pem_tab
 
 
 def parse_camera_json_file(file_path: str | None) -> tuple:
@@ -67,86 +68,137 @@ def build_ui(service: DepthService) -> gr.Blocks:
 
         glb_file = str(result.pointcloud_glb) if result.pointcloud_glb else None
         ply_file = str(result.pointcloud_ply) if result.pointcloud_ply else None
+        sensor_glb_file = (
+            str(result.sensor_pointcloud_glb) if result.sensor_pointcloud_glb else None
+        )
+        sensor_ply_file = (
+            str(result.sensor_pointcloud_ply) if result.sensor_pointcloud_ply else None
+        )
         return (
-            result.processed_rgb,
+            result.sensor_depth_vis,
             result.pred_depth_vis,
             result.fused_depth_vis,
+            result.processed_rgb,
             result.conf_vis,
-            result.sensor_depth_vis,
+            result.fusion_mask_vis,
+            sensor_glb_file,
+            sensor_glb_file,
+            sensor_ply_file,
             glb_file,
             glb_file,
             ply_file,
             info,
         )
 
-    with gr.Blocks(title="Gen6D Depth Demo") as demo:
-        gr.Markdown(
-            "# Gen6D 深度估计演示\n"
-            "上传 RGB + 传感器深度 PNG（uint16 原始文件，勿上传伪彩色图）+ 相机内参，"
-            "执行 DA3 推理与深度融合。"
-            "融合点云默认降采样至 5 万点，支持浏览器预览与 GLB/PLY 下载。"
-        )
+    with gr.Blocks(title="Gen6D") as demo:
+        gr.Markdown("# Gen6D")
 
-        with gr.Row():
-            rgb_input = gr.Image(type="pil", label="RGB 图像", height=320)
-            depth_input = gr.File(
-                label="传感器深度 PNG（uint16 原始深度）",
-                file_types=[".png"],
-                type="filepath",
-            )
-            intrinsics_input = gr.File(
-                label="相机内参 JSON（融合/点云必需）",
-                file_types=[".json"],
-                type="filepath",
-            )
+        with gr.Tabs():
+            with gr.Tab("深度估计"):
+                gr.Markdown(
+                    "上传 RGB + 传感器深度 PNG（uint16 原始文件，勿上传伪彩色图）+ 相机内参，"
+                    "执行 DA3 推理与深度融合。"
+                    "点云默认降采样至 5 万点，支持 **传感器 / 融合** 双 3D 预览与 GLB/PLY 下载。"
+                )
 
-        upload_btn = gr.Button("运行推理", variant="primary", size="lg")
+                with gr.Row():
+                    rgb_input = gr.Image(type="pil", label="RGB 图像", height=320)
+                    depth_input = gr.File(
+                        label="传感器深度 PNG（uint16 原始深度）",
+                        file_types=[".png"],
+                        type="filepath",
+                    )
+                    intrinsics_input = gr.File(
+                        label="相机内参 JSON（融合/点云必需）",
+                        file_types=[".json"],
+                        type="filepath",
+                    )
 
-        gr.Markdown("### 推理结果")
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("**预处理后 RGB**")
-                out_rgb = gr.Image(show_label=False, height=320, interactive=False)
-            with gr.Column():
-                gr.Markdown("**预测深度**")
-                out_pred = gr.Image(show_label=False, height=320, interactive=False)
-            with gr.Column():
-                gr.Markdown("**融合深度**")
-                out_fused = gr.Image(show_label=False, height=320, interactive=False)
-            with gr.Column():
-                gr.Markdown("**置信度**")
-                out_conf = gr.Image(show_label=False, height=320, interactive=False)
-            with gr.Column():
-                gr.Markdown("**传感器深度**")
-                out_sensor = gr.Image(show_label=False, height=320, interactive=False)
+                upload_btn = gr.Button("运行推理", variant="primary", size="lg")
 
-        gr.Markdown("### 3D 点云（融合深度）")
-        with gr.Row():
-            with gr.Column(scale=2):
-                gr.Markdown("**浏览器预览（GLB）**")
-                out_pointcloud_3d = gr.Model3D(show_label=False, height=420)
-            with gr.Column(scale=1):
-                gr.Markdown("**下载点云文件**")
-                out_glb_download = gr.File(label="GLB 下载", interactive=False)
-                out_ply_download = gr.File(label="PLY 下载", interactive=False)
+                gr.Markdown("### 推理结果")
 
-        out_info = gr.Textbox(label="推理信息", lines=12)
+                gr.Markdown("#### 深度对比")
+                gr.Markdown(
+                    "> **色标含义**：蓝色 = 较近，绿色 = 中等，红色 = 较远。"
+                    "比例尺数值为当前图 **5%–95% 分位数**。"
+                    "预测深度为 DA3 **相对深度**；传感器/融合深度单位为 **mm**。"
+                )
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("**传感器深度**")
+                        out_sensor = gr.Image(show_label=False, height=280, interactive=False)
+                    with gr.Column():
+                        gr.Markdown("**预测深度**")
+                        out_pred = gr.Image(show_label=False, height=280, interactive=False)
+                    with gr.Column():
+                        gr.Markdown("**融合深度**")
+                        out_fused = gr.Image(show_label=False, height=280, interactive=False)
 
-        upload_btn.click(
-            run_upload,
-            inputs=[rgb_input, depth_input, intrinsics_input],
-            outputs=[
-                out_rgb,
-                out_pred,
-                out_fused,
-                out_conf,
-                out_sensor,
-                out_pointcloud_3d,
-                out_glb_download,
-                out_ply_download,
-                out_info,
-            ],
-        )
+                gr.Markdown("#### 辅助信息")
+                with gr.Row():
+                    with gr.Column():
+                        gr.Markdown("**预处理后 RGB**")
+                        out_rgb = gr.Image(show_label=False, height=280, interactive=False)
+                    with gr.Column():
+                        gr.Markdown("**置信度**")
+                        out_conf = gr.Image(show_label=False, height=280, interactive=False)
+                    with gr.Column():
+                        gr.Markdown("**融合区域**")
+                        out_fusion_mask = gr.Image(show_label=False, height=280, interactive=False)
+
+                gr.Markdown(
+                    "> **融合区域图例**：绿色 = 保留传感器深度，橙色 = DA3 估计补全"
+                )
+
+                gr.Markdown("### 3D 点云对比")
+                gr.Markdown(
+                    "> 并排对比 **传感器原始深度** 与 **融合深度** 点云（默认各降采样至 5 万点）。"
+                    "传感器点云常有空洞/缺失；融合后应更完整、边缘更连续。"
+                )
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        gr.Markdown("**传感器深度**")
+                        out_sensor_pointcloud_3d = gr.Model3D(
+                            label="浏览器预览（GLB）",
+                            show_label=True,
+                            height=420,
+                        )
+                        out_sensor_glb_download = gr.File(label="GLB 下载", interactive=False)
+                        out_sensor_ply_download = gr.File(label="PLY 下载", interactive=False)
+                    with gr.Column(scale=1):
+                        gr.Markdown("**融合深度**")
+                        out_pointcloud_3d = gr.Model3D(
+                            label="浏览器预览（GLB）",
+                            show_label=True,
+                            height=420,
+                        )
+                        out_glb_download = gr.File(label="GLB 下载", interactive=False)
+                        out_ply_download = gr.File(label="PLY 下载", interactive=False)
+
+                out_info = gr.Textbox(label="推理信息", lines=12)
+
+                upload_btn.click(
+                    run_upload,
+                    inputs=[rgb_input, depth_input, intrinsics_input],
+                    outputs=[
+                        out_sensor,
+                        out_pred,
+                        out_fused,
+                        out_rgb,
+                        out_conf,
+                        out_fusion_mask,
+                        out_sensor_pointcloud_3d,
+                        out_sensor_glb_download,
+                        out_sensor_ply_download,
+                        out_pointcloud_3d,
+                        out_glb_download,
+                        out_ply_download,
+                        out_info,
+                    ],
+                )
+
+            build_point_sam_pem_tab(service)
 
     return demo
 

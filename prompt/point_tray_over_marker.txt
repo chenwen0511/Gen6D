@@ -1,0 +1,26 @@
+Locate the single white plastic tray / plate / circular material tray that is directly above the green square slot marker.
+
+Important visual rule:
+- First locate the green square slot marker.
+- The marker is a small green square plastic clip attached to the front horizontal rail of the metal rack.
+- It is NOT a blue dot or circular marker.
+- Then find the ONE white vertical tray / plate / circular plastic piece in the SAME rack slot as the green square marker.
+- The marker and the target tray must belong to the same slot: they share the same vertical column / vertical alignment on the rack.
+- The target is the white tray immediately above the green square marker along that same vertical direction, not the green marker itself.
+- Point at the center of the white plastic tray / plate / circular material tray in that slot.
+- Do NOT point at trays in neighboring slots on the left or right.
+- Do NOT point at the metal rack, background, or green square marker.
+
+Output the point coordinates in JSON format.
+For example:
+[
+  {"point_2d": [x, y], "label": "white_tray_above_green_marker"}
+]
+
+Point rule:
+- point_2d must be the center of the white tray / plate / circular material tray.
+- Coordinates are normalized to 0–1000.
+- Return at most ONE point.
+- Return [] if no green marker is visible or target is unclear.
+- label must be exactly "white_tray_above_green_marker".
+- No explanation. No markdown. JSON array only.

@@ -64,7 +64,9 @@ def blend_boundary(
     dist = ndimage.distance_transform_edt(~valid_mask)
     max_dist = max(float(dist[boundary].max()), 1.0)
     alpha = np.clip(dist / max_dist, 0.0, 1.0)
-    blend = alpha * sensor_depth + (1.0 - alpha) * metric_est_depth
+    # 传感器无效处不能参与混合，否则 alpha*NaN 会把估计深度也污染成 NaN
+    sensor_safe = np.where(valid_mask, sensor_depth, metric_est_depth)
+    blend = alpha * sensor_safe + (1.0 - alpha) * metric_est_depth
     out[boundary] = blend[boundary]
     return out
 

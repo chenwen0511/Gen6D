@@ -16,7 +16,7 @@ from src.depth.service import (
 )
 
 
-DEFAULT_TEST_DIR = Path(__file__).resolve().parents[2] / "test" / "5_piece"
+DEFAULT_TEST_DIR = Path(__file__).resolve().parents[2] / "samples" / "5_piece"
 DEFAULT_OUTPUT_DIR = DEFAULT_TEST_DIR / "da3_output"
 
 

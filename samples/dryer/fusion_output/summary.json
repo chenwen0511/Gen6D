@@ -1,0 +1,25 @@
+{
+  "sample": "dryer",
+  "rgb": "/data/ubuntu/stephen/01-code/Gen6D/test/dryer/rgb.png",
+  "depth": "/data/ubuntu/stephen/01-code/Gen6D/test/dryer/depth_raw.png",
+  "camera": "/data/ubuntu/stephen/01-code/Gen6D/test/dryer/camera.json",
+  "depth_scale": 1.0,
+  "fusion_status": "fallback_inpaint_only",
+  "fusion_message": "对齐未完全成功，传感器有效区保留原值，空洞用估计深度填充",
+  "sensor_valid_ratio": 0.7887228732638889,
+  "hole_fill_ratio": 1.0,
+  "fused_black_ratio": 0.0,
+  "scale": 1.0,
+  "shift": 0.0,
+  "align_inlier_ratio": 0.27748448006053206,
+  "fusion": {
+    "status": "fallback_inpaint_only",
+    "message": "对齐未完全成功，传感器有效区保留原值，空洞用估计深度填充",
+    "scale": 1.0,
+    "shift": 0.0,
+    "align_inlier_ratio": 0.27748448006053206,
+    "sensor_valid_ratio": 0.7887228732638889,
+    "fused_valid_ratio": 1.0,
+    "inpaint_ratio": 0.2112771267361111
+  }
+}
