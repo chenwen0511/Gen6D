@@ -332,6 +332,57 @@ def create_pose_axes_mesh(
     return trimesh.util.concatenate(parts)
 
 
+def create_pose_marker_sphere(
+    origin: np.ndarray,
+    *,
+    radius_mm: float = 10.0,
+    color_rgba: Sequence[int] = (255, 0, 255, 255),
+) -> trimesh.Trimesh:
+    """醒目球体，用于标出 p_i / 关键点。"""
+    origin = np.asarray(origin, dtype=np.float64)
+    sphere = trimesh.creation.icosphere(radius=float(radius_mm), subdivisions=2)
+    sphere.apply_translation(origin)
+    rgba = np.array(color_rgba, dtype=np.uint8)
+    if rgba.shape[0] == 3:
+        rgba = np.concatenate([rgba, np.array([255], dtype=np.uint8)])
+    sphere.visual.face_colors = np.tile(rgba, (len(sphere.faces), 1))
+    return sphere
+
+
+def inject_axis_points(
+    origin_glb: np.ndarray,
+    rotation_glb: np.ndarray,
+    *,
+    axis_length_mm: float = 50.0,
+    samples_per_axis: int = 24,
+    core_color: Sequence[int] = (255, 0, 255),
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    用点列画出原点 + 三轴（兼容 Gradio 只渲染 PointCloud 的情况）。
+    返回 (M,3) 点、(M,3) RGB。
+    """
+    origin_glb = np.asarray(origin_glb, dtype=np.float64)
+    rotation_glb = np.asarray(rotation_glb, dtype=np.float64)
+    axis_colors = (
+        np.array([255, 64, 64], dtype=np.uint8),
+        np.array([64, 220, 64], dtype=np.uint8),
+        np.array([64, 96, 255], dtype=np.uint8),
+    )
+    pts: list[np.ndarray] = []
+    cols: list[np.ndarray] = []
+    # 原点密集球状点云
+    rng = np.random.default_rng(0)
+    core = origin_glb + rng.normal(0.0, 2.5, size=(80, 3))
+    pts.append(core)
+    cols.append(np.tile(np.asarray(core_color, dtype=np.uint8), (core.shape[0], 1)))
+    for axis_idx, color in enumerate(axis_colors):
+        direction = rotation_glb[:, axis_idx]
+        for t in np.linspace(0.0, axis_length_mm, samples_per_axis):
+            pts.append(origin_glb + direction * float(t))
+            cols.append(color)
+    return np.vstack(pts).astype(np.float32), np.vstack(cols).astype(np.uint8)
+
+
 def export_scene_glb(geometries: Sequence[trimesh.Trimesh | trimesh.points.PointCloud], output_path: Path) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -340,6 +391,262 @@ def export_scene_glb(geometries: Sequence[trimesh.Trimesh | trimesh.points.Point
         scene.add_geometry(geom)
     scene.export(output_path)
     return output_path
+
+
+def depth_instance_to_pointcloud(
+    depth: np.ndarray,
+    instance_id_map: np.ndarray,
+    intrinsics: np.ndarray,
+    instance_colors_rgb: Sequence[Sequence[int]],
+    *,
+    max_points: int = DEFAULT_MAX_POINTS,
+    background_color: Sequence[int] = (88, 88, 96),
+) -> tuple[np.ndarray, np.ndarray, dict[str, int]]:
+    """
+    传感器深度反投影，按实例 id mask 分色。
+
+    ``instance_id_map``：H×W，0=背景，1..N=实例；``instance_colors_rgb`` 按 id-1 取色。
+    """
+    h, w = depth.shape
+    if instance_id_map.shape != (h, w):
+        id_img = Image.fromarray(instance_id_map.astype(np.uint8)).resize((w, h), Image.NEAREST)
+        instance_id_map = np.array(id_img, dtype=np.uint8)
+
+    fx, fy = intrinsics[0, 0], intrinsics[1, 1]
+    cx, cy = intrinsics[0, 2], intrinsics[1, 2]
+    u_coords, v_coords = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    valid = np.isfinite(depth) & (depth > 0)
+    if not valid.any():
+        return (
+            np.empty((0, 3), dtype=np.float32),
+            np.empty((0, 3), dtype=np.uint8),
+            {"background": 0, "instances": 0},
+        )
+
+    z = depth[valid].astype(np.float32)
+    x = (u_coords[valid] - cx) * z / fx
+    y = (v_coords[valid] - cy) * z / fy
+    points = np.stack([x, y, z], axis=-1)
+    points[:, 1] *= -1
+
+    ids = instance_id_map[valid].astype(np.int32)
+    colors = np.tile(np.asarray(background_color, dtype=np.uint8), (points.shape[0], 1))
+    palette = [np.asarray(c, dtype=np.uint8)[:3] for c in instance_colors_rgb]
+    for inst_id in np.unique(ids):
+        if int(inst_id) <= 0:
+            continue
+        color = palette[(int(inst_id) - 1) % max(len(palette), 1)] if palette else np.array([255, 140, 30], dtype=np.uint8)
+        colors[ids == inst_id] = color
+
+    # 采样时优先保留实例点
+    n = points.shape[0]
+    if n > max_points:
+        rng = np.random.default_rng(42)
+        keep = np.zeros(n, dtype=bool)
+        remaining = max_points
+        for mask in (ids > 0, ids == 0):
+            idx = np.flatnonzero(mask)
+            if idx.size == 0:
+                continue
+            if idx.size <= remaining:
+                keep[idx] = True
+                remaining -= int(idx.size)
+            else:
+                keep[rng.choice(idx, remaining, replace=False)] = True
+                remaining = 0
+                break
+        points = points[keep]
+        colors = colors[keep]
+        ids = ids[keep]
+
+    return points, colors, {
+        "background": int(np.count_nonzero(ids == 0)),
+        "instances": int(np.count_nonzero(ids > 0)),
+        "instance_ids": int(len(np.unique(ids[ids > 0]))),
+    }
+
+
+def depth_instance_points_camera(
+    depth: np.ndarray,
+    instance_id_map: np.ndarray,
+    intrinsics: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    反投影到相机系（Y 向下，Z 向前，单位 mm），返回 (N,3) 点与 (N,) 实例 id。
+    不做 Y 翻转、不降采样，供实例内离群剔除 / min-Z 分析。
+    """
+    h, w = depth.shape
+    if instance_id_map.shape != (h, w):
+        id_img = Image.fromarray(instance_id_map.astype(np.uint8)).resize((w, h), Image.NEAREST)
+        instance_id_map = np.array(id_img, dtype=np.uint8)
+
+    fx, fy = intrinsics[0, 0], intrinsics[1, 1]
+    cx, cy = intrinsics[0, 2], intrinsics[1, 2]
+    u_coords, v_coords = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    valid = np.isfinite(depth) & (depth > 0) & (instance_id_map > 0)
+    if not valid.any():
+        return np.empty((0, 3), dtype=np.float64), np.empty((0,), dtype=np.int32)
+
+    z = depth[valid].astype(np.float64)
+    x = (u_coords[valid] - cx) * z / fx
+    y = (v_coords[valid] - cy) * z / fy
+    points = np.stack([x, y, z], axis=-1)
+    ids = instance_id_map[valid].astype(np.int32)
+    return points, ids
+
+
+def remove_statistical_outliers(
+    points: np.ndarray,
+    *,
+    std_ratio: float = 2.0,
+    z_mad_ratio: float = 2.5,
+) -> np.ndarray:
+    """对单实例点云做简单统计离群剔除（质心距离 + Z 的 MAD）。"""
+    if points.ndim != 2 or points.shape[0] < 8:
+        return points
+
+    center = np.median(points, axis=0)
+    dist = np.linalg.norm(points - center, axis=1)
+    d_med = float(np.median(dist))
+    d_mad = float(np.median(np.abs(dist - d_med))) + 1e-6
+    keep = dist <= (d_med + std_ratio * 1.4826 * d_mad)
+
+    z = points[:, 2]
+    z_med = float(np.median(z[keep])) if keep.any() else float(np.median(z))
+    z_mad = float(np.median(np.abs(z[keep] - z_med))) + 1e-6 if keep.any() else 1e-6
+    keep &= np.abs(z - z_med) <= (z_mad_ratio * 1.4826 * z_mad)
+
+    if int(keep.sum()) < 3:
+        return points
+    return points[keep]
+
+
+def find_instance_min_z_points(
+    depth: np.ndarray,
+    instance_id_map: np.ndarray,
+    intrinsics: np.ndarray,
+    *,
+    std_ratio: float = 2.0,
+    z_mad_ratio: float = 2.5,
+) -> list[dict]:
+    """
+    对每个实例：剔除离群点 → 取相机系 Z（深度）最小的点 p_i（最近）。
+
+    :return: [{instance_id, position_mm, num_raw, num_inlier, z_mm}, ...]
+    """
+    points, ids = depth_instance_points_camera(depth, instance_id_map, intrinsics)
+    results: list[dict] = []
+    if points.size == 0:
+        return results
+
+    for inst_id in sorted(int(v) for v in np.unique(ids) if int(v) > 0):
+        pts = points[ids == inst_id]
+        raw_n = int(pts.shape[0])
+        inliers = remove_statistical_outliers(pts, std_ratio=std_ratio, z_mad_ratio=z_mad_ratio)
+        if inliers.shape[0] == 0:
+            continue
+        idx = int(np.argmin(inliers[:, 2]))
+        p_i = inliers[idx]
+        results.append(
+            {
+                "instance_id": inst_id,
+                "position_mm": [round(float(p_i[0]), 2), round(float(p_i[1]), 2), round(float(p_i[2]), 2)],
+                "z_mm": round(float(p_i[2]), 2),
+                "num_raw": raw_n,
+                "num_inlier": int(inliers.shape[0]),
+            }
+        )
+    return results
+
+
+# 兼容旧名
+find_instance_max_z_points = find_instance_min_z_points
+
+
+def find_instance_nearest_p1_x_points(
+    depth: np.ndarray,
+    instance_id_map: np.ndarray,
+    intrinsics: np.ndarray,
+    p1_position_mm: np.ndarray | Sequence[float],
+    p1_rotation: np.ndarray | Sequence[Sequence[float]],
+    *,
+    std_ratio: float = 2.0,
+    z_mad_ratio: float = 2.5,
+) -> list[dict]:
+    """
+    对每个实例：剔除外点后，取沿 P1 局部 X 轴距离 |((p-p1)·X)| 最小的点。
+
+    :return: [{instance_id, position_mm, x_dist_mm, z_mm, num_raw, num_inlier}, ...]
+    """
+    p1 = np.asarray(p1_position_mm, dtype=np.float64).reshape(3)
+    rot = np.asarray(p1_rotation, dtype=np.float64).reshape(3, 3)
+    x_axis = rot[:, 0]
+    x_norm = float(np.linalg.norm(x_axis))
+    if x_norm < 1e-12:
+        x_axis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    else:
+        x_axis = x_axis / x_norm
+
+    points, ids = depth_instance_points_camera(depth, instance_id_map, intrinsics)
+    results: list[dict] = []
+    if points.size == 0:
+        return results
+
+    for inst_id in sorted(int(v) for v in np.unique(ids) if int(v) > 0):
+        pts = points[ids == inst_id]
+        raw_n = int(pts.shape[0])
+        inliers = remove_statistical_outliers(pts, std_ratio=std_ratio, z_mad_ratio=z_mad_ratio)
+        if inliers.shape[0] == 0:
+            continue
+        x_dist = np.abs((inliers - p1) @ x_axis)
+        idx = int(np.argmin(x_dist))
+        p_sel = inliers[idx]
+        results.append(
+            {
+                "instance_id": inst_id,
+                "position_mm": [
+                    round(float(p_sel[0]), 2),
+                    round(float(p_sel[1]), 2),
+                    round(float(p_sel[2]), 2),
+                ],
+                "x_dist_mm": round(float(x_dist[idx]), 2),
+                "z_mm": round(float(p_sel[2]), 2),
+                "num_raw": raw_n,
+                "num_inlier": int(inliers.shape[0]),
+            }
+        )
+    return results
+
+
+def build_instance_pointcloud_files(
+    depth: np.ndarray,
+    instance_id_map: np.ndarray,
+    intrinsics: np.ndarray,
+    instance_colors_rgb: Sequence[Sequence[int]],
+    output_dir: Path,
+    *,
+    max_points: int = DEFAULT_MAX_POINTS,
+    stem: str | None = None,
+) -> dict:
+    """生成按 SAM3 实例分色的传感器深度点云 GLB/PLY。"""
+    points, colors, stats = depth_instance_to_pointcloud(
+        depth=depth,
+        instance_id_map=instance_id_map,
+        intrinsics=intrinsics,
+        instance_colors_rgb=instance_colors_rgb,
+        max_points=max_points,
+    )
+    stem = stem or uuid.uuid4().hex[:12]
+    glb_path = output_dir / f"{stem}_instance.glb"
+    ply_path = output_dir / f"{stem}_instance.ply"
+    export_pointcloud_ply(points, colors, ply_path)
+    export_pointcloud_glb(points, colors, glb_path)
+    return {
+        "point_count": int(points.shape[0]),
+        "glb_path": glb_path,
+        "ply_path": ply_path,
+        "point_stats": stats,
+    }
 
 
 def build_pointcloud_scene_files(

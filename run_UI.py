@@ -16,6 +16,7 @@ from src.depth.service import (
     load_sensor_depth_from_image,
 )
 from src.grasp.ui import build_point_sam_pem_tab
+from src.grasp.sam3_tab import build_sam3_seg_tab
 
 
 def parse_camera_json_file(file_path: str | None) -> tuple:
@@ -198,6 +199,7 @@ def build_ui(service: DepthService) -> gr.Blocks:
                     ],
                 )
 
+            build_sam3_seg_tab(service)
             build_point_sam_pem_tab(service)
 
     return demo
