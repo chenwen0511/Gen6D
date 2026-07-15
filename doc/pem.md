@@ -5,8 +5,9 @@ Gen6D 抓取/放置链路中，**6D 位姿估计（PEM）** 的目标对象为�
 相关文档：
 
 - [SAM-6D REST API](sam6d_rest_api.md) — **位姿估计后端接口（主参考）**
+- [SAM3 分割 Tab / 抓取点 q](sam3_seg_tab.md) — 标记位 P1 → `q`（`xyzrxryrz`），与 SAM-6D 对照
 - [深度融合方案](depth_fusion.md) — 融合深度 `D_fused` 作为 `/infer` 的 depth 输入
-- [Gen6D REST API](接口文档.md) — 深度推理 HTTP 接口
+- [Gen6D REST API](接口文档.md) — 深度推理 HTTP 接口 / UI 入口
 
 ---
 

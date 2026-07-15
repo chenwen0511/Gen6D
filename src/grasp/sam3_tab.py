@@ -33,7 +33,7 @@ from src.depth.service import (
     load_intrinsics_from_dict,
     load_sensor_depth_from_image,
 )
-from src.grasp.place_geometry import rotation_matrix_to_euler_zyx
+from src.grasp.grasp_infer import format_grasp_xyzrxryrz
 from src.grasp.marker import (
     camera_from_path,
     estimate_p1_from_marker,
@@ -110,39 +110,6 @@ def _empty_grasp_json(message: str = "尚未计算出抓取点 q") -> str:
         ensure_ascii=False,
         indent=2,
     )
-
-
-def format_grasp_xyzrxryrz(
-    position_mm: Any,
-    rotation_3x3: Any,
-    *,
-    meta: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    夹爪抓取位姿：``[x, y, z, rx, ry, rz]``。
-    xyz 单位 mm；rx/ry/rz 为单位 °，由旋转矩阵按 ZYX 欧拉角换算，
-    其中 rz=Yaw(Z)、ry=Pitch(Y)、rx=Roll(X)。
-    """
-    pos = np.asarray(position_mm, dtype=np.float64).reshape(3)
-    rot = np.asarray(rotation_3x3, dtype=np.float64).reshape(3, 3)
-    z_rad, y_rad, x_rad = rotation_matrix_to_euler_zyx(rot)
-    rx = round(float(np.degrees(x_rad)), 3)
-    ry = round(float(np.degrees(y_rad)), 3)
-    rz = round(float(np.degrees(z_rad)), 3)
-    xyz = [round(float(pos[0]), 2), round(float(pos[1]), 2), round(float(pos[2]), 2)]
-    xyzrxryrz = [xyz[0], xyz[1], xyz[2], rx, ry, rz]
-    out: Dict[str, Any] = {
-        "success": True,
-        "xyzrxryrz": xyzrxryrz,
-        "unit": {"xyz": "mm", "rx_ry_rz": "deg"},
-        "euler_convention": "ZYX (rz,ry,rx) → displayed as [x,y,z,rx,ry,rz]",
-        "position_mm": xyz,
-        "rpy_deg": {"rx": rx, "ry": ry, "rz": rz},
-        "rotation_matrix": rot.round(6).tolist(),
-    }
-    if meta:
-        out["meta"] = meta
-    return out
 
 
 def _error_outputs(message: str, *, sensor_vis: Optional[Image.Image] = None) -> Sam3TabOutputs:

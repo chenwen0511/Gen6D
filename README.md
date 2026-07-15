@@ -1,8 +1,54 @@
 # Gen6D
 
-面向工业抓取场景的 **6D 位姿估计** 方案：融合传感器深度与大模型估计深度，结合分割与位姿估计模型，输出物体在相机坐标系下的 6D 位姿。
+面向工业抓取场景的 **6D 位姿估计** 与 **标记位附近抓取点** 方案：融合传感器深度与大模型估计深度，结合 SAM3 分割 / SAM-6D 位姿，输出相机坐标系下的 6D 位姿或夹爪抓取点 `q`。
 
 ![Pipeline](doc/pipeline.png)
+
+## 快速开始
+
+```bash
+cd /home/ubuntu/stephen/01-code/Gen6D
+bash start.sh restart    # 默认 :8000；可用 DEVICE=cpu
+```
+
+| 入口 | URL |
+|------|-----|
+| Web UI | `http://<host>:8000/ui` |
+| API Docs | `http://<host>:8000/docs` |
+
+配置见 `config/grasp_config.json`（SAM3 / SAM-6D / 标记位 place 默认项）。
+
+### Web UI 页签
+
+| 页签 | 作用 |
+|------|------|
+| **深度估计** | 传感器深度 + DA3 估计 + 融合深度可视化 / 点云 |
+| **SAM3 分割** | 实例分割 + 标记位 P1 → 抓取点 `q`（`xyzrxryrz`） |
+| **融合深度 + SAM-6D** | 融合或传感器深度 → SAM-6D（`seg_backend=sam3`）6D 位姿 |
+
+详细流程见 [doc/sam3_seg_tab.md](doc/sam3_seg_tab.md)。
+
+---
+
+## 近期更新（摘要）
+
+相对早期「仅深度融合」骨架，近期主要落地：
+
+1. **SAM-6D 对接**（`5d94a48`）  
+   - UI 调用 SAM-6D `POST /infer`（form：`seg_backend=sam3` 等）  
+   - 可选深度来源：融合深度 / 原始传感器深度  
+   - 文档：[doc/sam6d_rest_api.md](doc/sam6d_rest_api.md)、[doc/pem.md](doc/pem.md)
+
+2. **SAM3 分割 Tab**（`55236af`）  
+   - 传感器深度实例分色点云；绿色标记位 → **P1**（PEM 同款几何）  
+   - 每实例：`p_i`（Z 最小）→ 预览 P1 / 实例点
+
+3. **抓取点 q + 预览拆分**（`2c59e71`）  
+   - `p_i` 后取相机系 `|y−p_i.y|≤2mm` 聚合中心 **`q_i`**；按 P1-X `|dx|` **只保留最近 1 个** 作为夹爪抓取点  
+   - UI JSON：`[x,y,z,rx,ry,rz]`（xyz=mm，姿态=°）  
+   - 实例分割预览拆成 **mask** / **bbox** 两张图（SAM3 Tab 与 SAM-6D ISM 均已支持）
+
+---
 
 ## 背景与动机
 
@@ -57,7 +103,10 @@ RGB 图像 ──┬──► 分割模型 (YOLO / SAM2) ──► 分割掩码 
 
 ### 输出
 
-- **6D 位姿**：物体相对于相机的旋转 + 平移（用于机械臂引导抓取）
+- **6D 位姿**（SAM-6D）：物体相对于相机的旋转 + 平移  
+- **抓取点 q**（SAM3 分割 Tab）：`[x, y, z, rx, ry, rz]`  
+  - `x,y,z`：相机系位置，单位 **mm**  
+  - `rx,ry,rz`：姿态，单位 **°**（由 P1 旋转按 ZYX 欧拉角换算）
 
 ---
 
@@ -90,7 +139,32 @@ D_metric_est = s · D_est + t
 
 ---
 
-## 接下来要做的步骤
+## 文档索引
+
+| 文档 | 说明 |
+|------|------|
+| [doc/sam3_seg_tab.md](doc/sam3_seg_tab.md) | **SAM3 分割 Tab**：P1 / p_i / q_i / 抓取位姿 |
+| [doc/grasp_api.md](doc/grasp_api.md) | **REST** `POST /api/v1/infer/grasp`（返回 `xyzrxryrz` + 可视化图） |
+| [doc/sam6d_rest_api.md](doc/sam6d_rest_api.md) | SAM-6D HTTP 服务 REST |
+| [doc/pem.md](doc/pem.md) | PEM / SAM-6D 集成说明 |
+| [doc/depth_fusion.md](doc/depth_fusion.md) | 深度融合细节 |
+| [doc/接口文档.md](doc/接口文档.md) | Gen6D 本仓深度预测 API |
+| [doc/da_basic_usage.md](doc/da_basic_usage.md) | Depth Anything 基础用法 |
+
+主要代码：
+
+```
+src/depth/          # 深度估计、融合、点云
+src/grasp/          # UI Tab、SAM3/SAM-6D 客户端、标记位与抓取点
+config/grasp_config.json
+prompt/             # SAM3 / 标记位 / VLM 提示词
+```
+
+---
+
+## 路线图（早期规划，部分已完成）
+
+> 下列 Phase 为立项时的检查清单；深度融合、SAM3、SAM-6D、抓取点 q 等已在 UI 中可用，未勾选项表示仍可继续加强。
 
 ### Phase 0：环境与数据准备
 
@@ -182,4 +256,5 @@ Phase 0 → Phase 3（深度融合，核心差异化）→ Phase 2 → Phase 1 �
 ## 参考
 
 - 方案设计图：[doc/pipeline.png](doc/pipeline.png)
-- 深度融合分析：[gemini.md](gemini.md)
+- SAM3 抓取点：[doc/sam3_seg_tab.md](doc/sam3_seg_tab.md)
+- 深度融合：[doc/depth_fusion.md](doc/depth_fusion.md)
