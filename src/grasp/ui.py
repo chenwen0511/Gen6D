@@ -61,6 +61,7 @@ from src.grasp.sam3 import (
     DEFAULT_SAM3_TIMEOUT_S,
     decode_sam3_raw_visualization,
     infer_sam3_with_image,
+    render_sam3_mask_bbox_previews,
 )
 from src.grasp.vlm import (
     VlmPointItem,
@@ -72,14 +73,15 @@ if TYPE_CHECKING:
     from src.depth.service import DepthService
 
 Sam6dUiOutputs = Tuple[
-    Optional[Image.Image],
-    Optional[Image.Image],
-    Optional[Image.Image],
-    str,
-    Optional[Image.Image],
-    Optional[str],
-    Optional[str],
-    Optional[str],
+    Optional[Image.Image],  # ism mask
+    Optional[Image.Image],  # ism bbox
+    Optional[Image.Image],  # pem vis
+    Optional[Image.Image],  # depth input vis
+    str,  # json
+    Optional[Image.Image],  # depth colormap
+    Optional[str],  # glb preview
+    Optional[str],  # glb download
+    Optional[str],  # ply download
 ]
 
 
@@ -111,7 +113,8 @@ def _filepath_from_upload(file_obj: Any) -> Optional[Path]:
 def _sam6d_error_outputs(
     message: str,
     *,
-    ism_vis: Optional[Image.Image] = None,
+    ism_mask_vis: Optional[Image.Image] = None,
+    ism_bbox_vis: Optional[Image.Image] = None,
     pem_vis: Optional[Image.Image] = None,
     fused_depth_vis: Optional[Image.Image] = None,
     scene_glb: Optional[str] = None,
@@ -119,7 +122,8 @@ def _sam6d_error_outputs(
 ) -> Sam6dUiOutputs:
     err = json.dumps({"success": False, "message": message}, ensure_ascii=False, indent=2)
     return (
-        ism_vis,
+        ism_mask_vis,
+        ism_bbox_vis,
         pem_vis,
         fused_depth_vis,
         err,
@@ -128,6 +132,16 @@ def _sam6d_error_outputs(
         scene_glb,
         scene_ply,
     )
+
+
+def _normalize_ism_detections(detection_ism: Any) -> list:
+    if isinstance(detection_ism, list):
+        return [d for d in detection_ism if isinstance(d, dict)]
+    if isinstance(detection_ism, dict):
+        dets = detection_ism.get("detections") or detection_ism.get("detection_ism")
+        if isinstance(dets, list):
+            return [d for d in dets if isinstance(d, dict)]
+    return []
 
 
 def _format_point_info(point: Optional[Tuple[int, int]], *, source: str = "") -> str:
@@ -574,7 +588,7 @@ def run_sam6d_pose_inference(
     )
     pem_poses = extract_pem_poses(sam6d_body)
 
-    ism_vis, ism_vis_url = try_load_sam6d_visualization(
+    ism_combined_vis, ism_vis_url = try_load_sam6d_visualization(
         sam6d_body,
         "vis_ism_path",
         **asset_kwargs,
@@ -584,6 +598,23 @@ def run_sam6d_pose_inference(
         "vis_pem_path",
         **asset_kwargs,
     )
+
+    ism_dets = _normalize_ism_detections(sam6d_body.get("detection_ism"))
+    ism_mask_vis: Optional[Image.Image] = None
+    ism_bbox_vis: Optional[Image.Image] = None
+    if ism_dets:
+        try:
+            ism_mask_vis, ism_bbox_vis = render_sam3_mask_bbox_previews(
+                image.convert("RGB"),
+                ism_dets,
+                prompt=prompt_text,
+            )
+        except Exception as exc:
+            log.exception("render ism mask/bbox failed: %s", exc)
+    if ism_mask_vis is None:
+        ism_mask_vis = ism_combined_vis
+    if ism_bbox_vis is None:
+        ism_bbox_vis = ism_combined_vis
 
     depth_colormap, depth_colormap_url, depth_colormap_path = try_load_pem_depth_colormap(
         sam6d_body,
@@ -610,6 +641,11 @@ def run_sam6d_pose_inference(
             f"CAD 由 SAM-6D 服务端 SAM6D_CAD_PATH 指定（配置参考: {DEFAULT_SAM6D_CAD_PATH}）"
         ),
         "sam6d_health": sam6d_health.get("body"),
+        "ism_preview": {
+            "num_detections": len(ism_dets),
+            "split": "mask / bbox",
+            "from_detection_ism": bool(ism_dets),
+        },
     }
     if ism_vis_url:
         payload["vis_ism_loaded_from_url"] = ism_vis_url
@@ -619,7 +655,7 @@ def run_sam6d_pose_inference(
         payload["depth_colormap_path"] = depth_colormap_path
     if depth_colormap_url:
         payload["depth_colormap_loaded_from_url"] = depth_colormap_url
-    if ism_vis is None or pem_vis is None:
+    if ism_combined_vis is None or pem_vis is None:
         attempted: Dict[str, Any] = {}
         for key in ("vis_ism_path", "vis_pem_path", "detection_pem_path", "detection_ism_path"):
             if sam6d_body.get(key):
@@ -640,7 +676,8 @@ def run_sam6d_pose_inference(
     sam6d_json = json.dumps(payload, ensure_ascii=False, indent=2)
 
     return (
-        ism_vis,
+        ism_mask_vis,
+        ism_bbox_vis,
         pem_vis,
         depth_input_vis,
         sam6d_json,
@@ -864,7 +901,9 @@ def build_point_sam_pem_tab(depth_service: "DepthService") -> None:
                 gr.Markdown("#### 快速预览")
                 with gr.Row():
                     ps_fused_depth = gr.Image(type="pil", label="SAM-6D 深度输入（伪彩色）", height=180)
-                    ps_ism_vis = gr.Image(type="pil", label="SAM-6D ISM 分割", height=180)
+                with gr.Row():
+                    ps_ism_mask = gr.Image(type="pil", label="SAM-6D ISM mask", height=180)
+                    ps_ism_bbox = gr.Image(type="pil", label="SAM-6D ISM bbox", height=180)
                 ps_pem_vis = gr.Image(type="pil", label="SAM-6D PEM 位姿可视化", height=220)
 
         gr.Markdown("### 3D 点云（SAM-6D 深度输入 + 位姿）")
@@ -953,7 +992,8 @@ def build_point_sam_pem_tab(depth_service: "DepthService") -> None:
                 ps_det_score_thresh,
             ],
             outputs=[
-                ps_ism_vis,
+                ps_ism_mask,
+                ps_ism_bbox,
                 ps_pem_vis,
                 ps_fused_depth,
                 ps_sam6d_json,

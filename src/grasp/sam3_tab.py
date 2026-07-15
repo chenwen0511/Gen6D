@@ -16,21 +16,24 @@ import trimesh
 from PIL import Image
 
 from src.depth.pointcloud import (
+    annotate_p1_x_distance,
     camera_pose_mm_to_glb,
     create_pose_axes_mesh,
     create_pose_marker_sphere,
     depth_instance_to_pointcloud,
     export_pointcloud_ply,
     export_scene_glb,
-    find_instance_min_z_points,
     find_instance_nearest_p1_x_points,
+    find_instance_qi_from_pi_y_band,
     inject_axis_points,
+    select_nearest_along_p1_x,
 )
 from src.depth.service import (
     depth_to_colormap_with_colorbar,
     load_intrinsics_from_dict,
     load_sensor_depth_from_image,
 )
+from src.grasp.place_geometry import rotation_matrix_to_euler_zyx
 from src.grasp.marker import (
     camera_from_path,
     estimate_p1_from_marker,
@@ -49,7 +52,7 @@ from src.grasp.sam3 import (
     build_instance_id_mask_from_detections,
     decode_sam3_raw_visualization,
     infer_sam3_with_image,
-    render_sam3_detections_on_image,
+    render_sam3_mask_bbox_previews,
 )
 from src.grasp.settings import (
     DEFAULT_PLACE_MARKER_PROMPT,
@@ -64,14 +67,16 @@ logger = logging.getLogger("sam3_tab")
 
 Sam3TabOutputs = Tuple[
     Optional[Image.Image],  # sensor depth
-    Optional[Image.Image],  # instance seg
+    Optional[Image.Image],  # instance mask
+    Optional[Image.Image],  # instance bbox
     Optional[Image.Image],  # marker p1 vis
-    Optional[Image.Image],  # p1 + p_i preview
-    Optional[Image.Image],  # p1 + p_ix (X-nearest) preview
+    Optional[Image.Image],  # p1 + q_i preview
+    Optional[Image.Image],  # p1 + p_ix preview
     Optional[str],  # glb preview
     Optional[str],  # glb download
     Optional[str],  # ply download
-    str,  # json
+    str,  # grasp pose json (q point)
+    str,  # detail json
 ]
 
 
@@ -94,9 +99,55 @@ def _vis_colors_rgb() -> List[Tuple[int, int, int]]:
     return [(int(r), int(g), int(b)) for (b, g, r) in _VIS_COLORS_BGR]
 
 
+def _empty_grasp_json(message: str = "尚未计算出抓取点 q") -> str:
+    return json.dumps(
+        {
+            "success": False,
+            "message": message,
+            "xyzrxryrz": None,
+            "unit": {"xyz": "mm", "rpy": "deg", "euler": "ZYX → [rx,ry,rz]=[X,Y,Z]"},
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def format_grasp_xyzrxryrz(
+    position_mm: Any,
+    rotation_3x3: Any,
+    *,
+    meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    夹爪抓取位姿：``[x, y, z, rx, ry, rz]``。
+    xyz 单位 mm；rx/ry/rz 为单位 °，由旋转矩阵按 ZYX 欧拉角换算，
+    其中 rz=Yaw(Z)、ry=Pitch(Y)、rx=Roll(X)。
+    """
+    pos = np.asarray(position_mm, dtype=np.float64).reshape(3)
+    rot = np.asarray(rotation_3x3, dtype=np.float64).reshape(3, 3)
+    z_rad, y_rad, x_rad = rotation_matrix_to_euler_zyx(rot)
+    rx = round(float(np.degrees(x_rad)), 3)
+    ry = round(float(np.degrees(y_rad)), 3)
+    rz = round(float(np.degrees(z_rad)), 3)
+    xyz = [round(float(pos[0]), 2), round(float(pos[1]), 2), round(float(pos[2]), 2)]
+    xyzrxryrz = [xyz[0], xyz[1], xyz[2], rx, ry, rz]
+    out: Dict[str, Any] = {
+        "success": True,
+        "xyzrxryrz": xyzrxryrz,
+        "unit": {"xyz": "mm", "rx_ry_rz": "deg"},
+        "euler_convention": "ZYX (rz,ry,rx) → displayed as [x,y,z,rx,ry,rz]",
+        "position_mm": xyz,
+        "rpy_deg": {"rx": rx, "ry": ry, "rz": rz},
+        "rotation_matrix": rot.round(6).tolist(),
+    }
+    if meta:
+        out["meta"] = meta
+    return out
+
+
 def _error_outputs(message: str, *, sensor_vis: Optional[Image.Image] = None) -> Sam3TabOutputs:
     err = json.dumps({"success": False, "message": message}, ensure_ascii=False, indent=2)
-    return sensor_vis, None, None, None, None, None, None, None, err
+    return sensor_vis, None, None, None, None, None, None, None, None, _empty_grasp_json(message), err
 
 
 def _detection_summary(detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -120,7 +171,7 @@ def _build_scene_with_optional_p1(
     id_map: Optional[np.ndarray],
     p1_pose: Any = None,
 ) -> Tuple[Optional[str], Optional[str], Dict[str, Any]]:
-    """实例分色点云 + P1 / p_i 醒目标记（烧进点云 + mesh）→ GLB/PLY。"""
+    """实例分色点云 + P1 / q_i 醒目标记（烧进点云 + mesh）→ GLB/PLY。"""
     h, w = sensor_depth.shape
     if id_map is None:
         id_map = np.zeros((h, w), dtype=np.uint8)
@@ -133,10 +184,17 @@ def _build_scene_with_optional_p1(
         max_points=depth_service.max_points,
     )
 
-    pi_list = find_instance_min_z_points(sensor_depth, id_map, intrinsics)
+    # p_i 规则不变 → y±2mm 带内聚合得 q_i；UI / 点云展示用 q_i
+    qi_all = find_instance_qi_from_pi_y_band(sensor_depth, id_map, intrinsics, y_band_mm=2.0)
     rotation_src = p1_pose.rotation if p1_pose is not None else np.eye(3, dtype=np.float64)
 
-    # Gradio Model3D 对 PointCloud 最稳：把 p_i / 轴方向直接画成点
+    if p1_pose is not None and qi_all:
+        qi_all = annotate_p1_x_distance(qi_all, p1_pose.position_mm, p1_pose.rotation)
+        qi_list = select_nearest_along_p1_x(qi_all)
+    else:
+        qi_list = list(qi_all)
+
+    # Gradio Model3D 对 PointCloud 最稳：把 q_i / 轴方向直接画成点
     marker_pts: list[np.ndarray] = []
     marker_cols: list[np.ndarray] = []
     geometries: list = []
@@ -164,7 +222,7 @@ def _build_scene_with_optional_p1(
             create_pose_axes_mesh(origin_p1, rot_p1, axis_length_mm=45.0, radius_mm=1.5)
         )
 
-    for item in pi_list:
+    for item in qi_list:
         origin_i, rot_i = camera_pose_mm_to_glb(item["position_mm"], rotation_src)
         core_rgb = pi_core_colors[(int(item["instance_id"]) - 1) % len(pi_core_colors)]
         p_pts, p_cols = inject_axis_points(
@@ -211,22 +269,27 @@ def _build_scene_with_optional_p1(
 
     export_scene_glb(geometries, glb_path)
     logger.info(
-        "scene built points=%s instances=%s pi=%s p1=%s",
+        "scene built points=%s instances=%s qi=%s p1=%s",
         points.shape[0],
         stats.get("instance_ids"),
-        len(pi_list),
+        len(qi_list),
         p1_pose is not None,
     )
     return str(glb_path), str(ply_path), {
         "point_count": int(points.shape[0]),
         "point_stats": stats,
         "p1_axes": p1_pose is not None,
-        "instance_pi": pi_list,
-        "pi_count": len(pi_list),
+        "instance_qi_all": qi_all,
+        "instance_qi": qi_list,
+        # 兼容旧字段名：UI 原先读 instance_pi，现为 q_i
+        "instance_pi_all": qi_all,
+        "instance_pi": qi_list,
+        "pi_count": len(qi_list),
+        "pi_candidate_count": len(qi_all),
         "pi_note": (
-            "各实例剔除外点后取相机系 Z 最小点 p_i（最近）；"
-            "点云中品红/青等密集球= p_i 原点，三色射线= 姿态（取自 p1）；"
-            "黄球=标记 P1"
+            "各实例：p_i=剔除外点后 Z 最小 → 取相机系 |y-p_i.y|≤2mm 点聚合中心 q_i；"
+            "有 P1 时再按 q_i 的 P1-X |dx| 只保留最近 1 个用于显示；"
+            "JSON 含 p_i_mm / q_i_mm，候选见 instance_qi_all"
         ),
     }
 
@@ -308,16 +371,34 @@ def run_sam3_seg_tab_inference(
             "message": str(exc),
             "traceback": traceback.format_exc(),
         }
-        return sensor_vis, None, None, None, None, None, None, None, json.dumps(err, ensure_ascii=False, indent=2)
+        return (
+            sensor_vis,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            _empty_grasp_json(str(exc)),
+            json.dumps(err, ensure_ascii=False, indent=2),
+        )
 
     detections = list(result.detections or [])
-    instance_vis = vis
-    if instance_vis is None:
-        instance_vis = decode_sam3_raw_visualization(result, image_for_seg)
-    if instance_vis is None and detections:
-        instance_vis = render_sam3_detections_on_image(
+    mask_vis: Optional[Image.Image] = None
+    bbox_vis: Optional[Image.Image] = None
+    if detections:
+        mask_vis, bbox_vis = render_sam3_mask_bbox_previews(
             image_for_seg, detections, prompt=prompt_text
         )
+    else:
+        # 无 detection 时退回服务端整图（可能含 mask+bbox）
+        fallback = vis
+        if fallback is None:
+            fallback = decode_sam3_raw_visualization(result, image_for_seg)
+        mask_vis = fallback
+        bbox_vis = fallback
 
     id_map: Optional[np.ndarray] = None
     instance_count = 0
@@ -399,50 +480,57 @@ def run_sam3_seg_tab_inference(
         logger.exception("pointcloud failed: %s", exc)
         pc_stats = {"error": str(exc)}
 
-    # --- 4) 2D 预览：P1 + 各 p_i（Z 最小）+ 各 p_ix（沿 P1-X 最近）---
+    # --- 4) 2D 预览：P1 + 最近（沿 P1-X）的 q_i / p_ix ---
     pi_preview: Optional[Image.Image] = None
     pix_preview: Optional[Image.Image] = None
     pix_list: list = []
     try:
-        base_img = instance_vis if instance_vis is not None else image_for_seg
+        base_img = mask_vis if mask_vis is not None else image_for_seg
+        qi_selected = list(pc_stats.get("instance_qi") or pc_stats.get("instance_pi") or [])
         pi_preview = render_p1_and_pi_preview(
             base_img,
             place_camera,
             p1=p1_pose,
-            pi_list=list(pc_stats.get("instance_pi") or []),
-            title="P1 / p_i (min-Z)",
-            point_prefix="p",
-            dist_key="z_mm",
-            dist_label="z",
+            pi_list=qi_selected,
+            title="P1 / nearest q_i on P1-X",
+            point_prefix="q",
+            dist_key="x_dist_mm" if (qi_selected and "x_dist_mm" in qi_selected[0]) else "z_mm",
+            dist_label="|dx|" if (qi_selected and "x_dist_mm" in qi_selected[0]) else "z",
+            draw_link_to_p1=True,
         )
         if p1_pose is not None and id_map is not None:
-            pix_list = find_instance_nearest_p1_x_points(
+            pix_all = find_instance_nearest_p1_x_points(
                 sensor_depth,
                 id_map,
                 intrinsics,
                 p1_pose.position_mm,
                 p1_pose.rotation,
             )
-            for item in pix_list:
+            for item in pix_all:
                 item["rotation_from"] = "p1"
                 item["rotation_matrix"] = np.asarray(p1_pose.rotation, dtype=np.float64).round(6).tolist()
+            pix_list = select_nearest_along_p1_x(pix_all)
+            pc_stats["instance_pi_x_all"] = pix_all
             pc_stats["instance_pi_x"] = pix_list
             pc_stats["pi_x_count"] = len(pix_list)
+            pc_stats["pi_x_candidate_count"] = len(pix_all)
             pc_stats["pi_x_note"] = (
-                "各实例剔除外点后，沿 P1 局部 X 轴取 |((p-p1)·X)| 最小点 p_ix"
+                "各实例先取沿 P1-X 最近的 p_ix；再对全部实例按 |dx| 排序，"
+                "只保留最近的 1 个显示；候选见 instance_pi_x_all"
             )
             pix_preview = render_p1_and_pi_preview(
                 base_img,
                 place_camera,
                 p1=p1_pose,
                 pi_list=pix_list,
-                title="P1 / p_ix (nearest on P1-X)",
+                title="P1 / nearest p_ix on P1-X",
                 point_prefix="px",
                 dist_key="x_dist_mm",
                 dist_label="|dx|",
                 draw_link_to_p1=True,
             )
         else:
+            pc_stats["instance_pi_x_all"] = []
             pc_stats["instance_pi_x"] = []
             pc_stats["pi_x_count"] = 0
             pc_stats["pi_x_note"] = "需要成功计算 P1 才能求沿 X 最近的 p_ix"
@@ -452,11 +540,41 @@ def run_sam3_seg_tab_inference(
     elapsed_s = time.perf_counter() - t0
     raw = dict(result.raw_response or {})
     raw.pop("visualization_base64", None)
+
+    qi_selected = list(pc_stats.get("instance_qi") or pc_stats.get("instance_pi") or [])
+    grasp_payload: Dict[str, Any]
+    if qi_selected:
+        q = qi_selected[0]
+        rot = q.get("rotation_matrix")
+        if rot is None and p1_pose is not None:
+            rot = p1_pose.rotation
+        if rot is None:
+            rot = np.eye(3, dtype=np.float64)
+        grasp_payload = format_grasp_xyzrxryrz(
+            q.get("q_i_mm") or q.get("position_mm"),
+            rot,
+            meta={
+                "instance_id": q.get("instance_id"),
+                "p_i_mm": q.get("p_i_mm"),
+                "q_i_mm": q.get("q_i_mm") or q.get("position_mm"),
+                "x_dist_mm": q.get("x_dist_mm"),
+                "num_band": q.get("num_band"),
+                "y_band_mm": q.get("y_band_mm"),
+                "rotation_from": q.get("rotation_from", "p1" if p1_pose is not None else "identity"),
+                "role": "gripper_grasp_point",
+            },
+        )
+    else:
+        grasp_payload = json.loads(_empty_grasp_json("无可用的 q 点（需实例分割成功，建议开启标记位 P1）"))
+
+    grasp_json = json.dumps(grasp_payload, ensure_ascii=False, indent=2)
+
     payload = {
         "success": True,
         "elapsed_s": round(elapsed_s, 3),
         "num_instances": instance_count or len(detections),
         "detections": _detection_summary(detections),
+        "grasp_pose": grasp_payload,
         "pointcloud": pc_stats,
         "scene_glb": glb_path,
         "sensor_valid_ratio": float(
@@ -472,13 +590,15 @@ def run_sam3_seg_tab_inference(
     }
     return (
         sensor_vis,
-        instance_vis,
+        mask_vis,
+        bbox_vis,
         p1_vis,
         pi_preview,
         pix_preview,
         glb_path,
         glb_path,
         ply_path,
+        grasp_json,
         json.dumps(payload, ensure_ascii=False, indent=2),
     )
 
@@ -542,11 +662,18 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                         precision=0,
                     )
                 sam3_btn = gr.Button("开始 SAM3 分割", variant="primary")
+                out_grasp = gr.Code(
+                    label="抓取点 q · xyzrxryrz（mm / °）",
+                    language="json",
+                    lines=12,
+                    value=_empty_grasp_json(),
+                )
 
             with gr.Column(scale=1):
                 gr.Markdown("#### 快速预览")
                 out_sensor = gr.Image(type="pil", label="传感器深度（伪彩色）", height=200)
-                out_seg = gr.Image(type="pil", label="SAM3 实例分割", height=200)
+                out_seg_mask = gr.Image(type="pil", label="SAM3 实例 mask", height=200)
+                out_seg_bbox = gr.Image(type="pil", label="SAM3 实例 bbox", height=200)
                 out_p1 = gr.Image(
                     type="pil",
                     label="标记位 P1（mask / 角点 / 坐标轴）",
@@ -554,21 +681,21 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                 )
                 out_pi = gr.Image(
                     type="pil",
-                    label="P1 + 各 p_i（Z 最小/最近）",
+                    label="P1 + 最近 q_i（p_i→y±2mm 聚合；按 P1-X 仅 1 个）",
                     height=240,
                 )
                 out_pix = gr.Image(
                     type="pil",
-                    label="P1 + 各 p_ix（沿 P1-X 最近）",
+                    label="P1 + 最近 p_ix（按 P1-X |dx|，仅 1 个）",
                     height=240,
                 )
 
-        gr.Markdown("### 3D 点云（传感器深度 · 实例分色 · P1 / p_i 坐标轴）")
+        gr.Markdown("### 3D 点云（传感器深度 · 实例分色 · P1 / q_i 坐标轴）")
         gr.Markdown(
             "> **灰色**=背景；**彩色**=各 SAM3 实例；"
-            "每实例剔除离群点后取 **Z 最小点 p_i（最近）**：点云里可见 **彩色密集球（原点）+ 红/绿/蓝射线（姿态，取自 P1）**；"
-            "黄球/短轴 = 标记 P1。若仍看不见，请看下方 JSON 的 `instance_pi`。"
-            "若开启标记位，另画较小的 P1 轴。"
+            "每实例先求 **p_i（Z 最小）**，再对 **|y−p_i.y|≤2mm** 点聚合得 **q_i** 用于展示；"
+            "有 P1 时再按 q_i 的 P1-X |dx| **只保留最近 1 个**。"
+            "黄球/短轴 = 标记 P1。详情见 JSON `instance_qi`（含 `p_i_mm` / `q_i_mm`）。"
         )
         with gr.Row():
             with gr.Column(scale=4):
@@ -599,13 +726,15 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
             ],
             outputs=[
                 out_sensor,
-                out_seg,
+                out_seg_mask,
+                out_seg_bbox,
                 out_p1,
                 out_pi,
                 out_pix,
                 out_glb,
                 out_glb_dl,
                 out_ply_dl,
+                out_grasp,
                 out_json,
             ],
         )
@@ -614,17 +743,18 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
             f"""
             **说明**
             - 实例分割：SAM3 `POST /infer` + 文本提示，默认 API `{DEFAULT_SAM3_API_URL}`
+              （快速预览拆成 **mask** / **bbox** 两张图）
             - **标记位 P1**（与 PEM_service 一致）：
               1. 用 marker 提示词分割 → 按绿度/长宽比选出标记
               2. 四角 A–D 对角线交点为中心 UV，邻域深度反投影得位置
               3. 辅助点 A'–D' 拟合平面法向 → X/Y/Z 姿态
-            - **实例 p_i**：对各实例点云剔除外点 → 取相机系 **Z 最小（最近）** 点，**姿态 = P1 旋转**
-            - **实例 p_ix**：剔除外点后，沿 **P1 局部 X 轴** 取 `|((p-p1)·X)|` 最小点（需先有 P1）
-            - **快速预览**：
-              - 「P1 + 各 p_i」：黄十字 = P1，彩斜十字 = p1/p2/…
-              - 「P1 + 各 p_ix」：黄十字 = P1，彩点 = px1/px2/…（灰线连向 P1）
-            - 点云仅用 **原始传感器深度**；3D 中 **p_i = 彩色密集球 + RGB 三色射线**（已烧进点云，避免 Model3D 不显 mesh）
-            - 黄球/短轴 = 标记 **P1**；请同时核对 JSON 的 `instance_pi` / `instance_pi_x`
+            - **抓取点 q**：最终保留的 q_i；左侧 JSON 的 `xyzrxryrz = [x,y,z,rx,ry,rz]`（xyz=mm，姿态=°，ZYX）
+            - **实例 q_i**：先按原规则求 **p_i（Z 最小）** → 取相机系 **|y−p_i.y|≤2mm** 点聚合中心 **q_i**（UI 展示 q_i）
+              → 有 P1 时再按 **P1-X |dx|** **只显示最近的 1 个**
+            - **实例 p_ix**：各实例沿 P1-X 最近点后，再按 **|dx|** 排序，**只显示最近的 1 个**
+            - **快速预览**：q_i / p_ix 图均只画选出的那一个点；候选在 JSON `instance_qi_all` / `instance_pi_x_all`
+            - 点云仅用 **原始传感器深度**；3D 标记为 **q_i**（彩色密集球 + RGB 三色射线）
+            - 黄球/短轴 = 标记 **P1**；请同时核对 JSON 的 `p_i_mm` / `q_i_mm` / `instance_qi`
             - 默认标记提示词：`{default_marker}`
             """
         )

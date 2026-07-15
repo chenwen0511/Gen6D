@@ -770,8 +770,10 @@ def render_sam3_detections_on_image(
     *,
     prompt: Optional[str] = None,
     mask_alpha: float = 0.5,
+    draw_mask: bool = True,
+    draw_bbox: bool = True,
 ) -> Image.Image:
-    """在 PIL 图像上叠加 SAM3 mask 与 bbox，返回新图像。"""
+    """在 PIL 图像上叠加 SAM3 mask 与/或 bbox，返回新图像。"""
     bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
     height, width = bgr.shape[:2]
     image_size = (width, height)
@@ -786,7 +788,11 @@ def render_sam3_detections_on_image(
         mask = _decode_detection_mask(det, image_size)
         color = _VIS_COLORS_BGR[idx % len(_VIS_COLORS_BGR)]
         color_arr = np.array(color, dtype=np.float32)
-        overlay[mask] = mask_alpha * color_arr + (1.0 - mask_alpha) * overlay[mask]
+        if draw_mask:
+            overlay[mask] = mask_alpha * color_arr + (1.0 - mask_alpha) * overlay[mask]
+
+        if not draw_bbox:
+            continue
 
         bbox = det.get("bbox")
         if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
@@ -810,6 +816,33 @@ def render_sam3_detections_on_image(
 
     rgb = cv2.cvtColor(overlay.astype(np.uint8), cv2.COLOR_BGR2RGB)
     return Image.fromarray(rgb)
+
+
+def render_sam3_mask_bbox_previews(
+    image: Image.Image,
+    instance_dets: List[Dict[str, Any]],
+    *,
+    prompt: Optional[str] = None,
+    mask_alpha: float = 0.5,
+) -> tuple[Image.Image, Image.Image]:
+    """分别返回仅 mask / 仅 bbox 两张预览图。"""
+    mask_vis = render_sam3_detections_on_image(
+        image,
+        instance_dets,
+        prompt=prompt,
+        mask_alpha=mask_alpha,
+        draw_mask=True,
+        draw_bbox=False,
+    )
+    bbox_vis = render_sam3_detections_on_image(
+        image,
+        instance_dets,
+        prompt=prompt,
+        mask_alpha=mask_alpha,
+        draw_mask=False,
+        draw_bbox=True,
+    )
+    return mask_vis, bbox_vis
 
 
 def infer_sam3_with_image(

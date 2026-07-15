@@ -559,6 +559,74 @@ def find_instance_min_z_points(
     return results
 
 
+def find_instance_qi_from_pi_y_band(
+    depth: np.ndarray,
+    instance_id_map: np.ndarray,
+    intrinsics: np.ndarray,
+    *,
+    y_band_mm: float = 2.0,
+    std_ratio: float = 2.0,
+    z_mad_ratio: float = 2.5,
+) -> list[dict]:
+    """
+    各实例：先按原规则取 p_i（剔除外点后 Z 最小），再取相机系 |y - p_i.y| ≤ y_band_mm
+    的点云求中心 q_i。``position_mm`` 为 q_i（供 UI 展示）。
+
+    :return: [{instance_id, position_mm(=q_i), p_i_mm, q_i_mm, y_ref_mm, y_band_mm,
+               num_band, num_raw, num_inlier, z_mm}, ...]
+    """
+    points, ids = depth_instance_points_camera(depth, instance_id_map, intrinsics)
+    results: list[dict] = []
+    if points.size == 0:
+        return results
+
+    band = float(y_band_mm)
+    for inst_id in sorted(int(v) for v in np.unique(ids) if int(v) > 0):
+        pts = points[ids == inst_id]
+        raw_n = int(pts.shape[0])
+        inliers = remove_statistical_outliers(pts, std_ratio=std_ratio, z_mad_ratio=z_mad_ratio)
+        if inliers.shape[0] == 0:
+            continue
+        idx = int(np.argmin(inliers[:, 2]))
+        p_i = inliers[idx]
+        y_ref = float(p_i[1])
+        band_mask = np.abs(inliers[:, 1] - y_ref) <= band
+        band_pts = inliers[band_mask]
+        if band_pts.shape[0] == 0:
+            q_i = p_i
+            num_band = 0
+        else:
+            q_i = band_pts.mean(axis=0)
+            num_band = int(band_pts.shape[0])
+        results.append(
+            {
+                "instance_id": inst_id,
+                "position_mm": [
+                    round(float(q_i[0]), 2),
+                    round(float(q_i[1]), 2),
+                    round(float(q_i[2]), 2),
+                ],
+                "p_i_mm": [
+                    round(float(p_i[0]), 2),
+                    round(float(p_i[1]), 2),
+                    round(float(p_i[2]), 2),
+                ],
+                "q_i_mm": [
+                    round(float(q_i[0]), 2),
+                    round(float(q_i[1]), 2),
+                    round(float(q_i[2]), 2),
+                ],
+                "y_ref_mm": round(y_ref, 2),
+                "y_band_mm": band,
+                "num_band": num_band,
+                "z_mm": round(float(q_i[2]), 2),
+                "num_raw": raw_n,
+                "num_inlier": int(inliers.shape[0]),
+            }
+        )
+    return results
+
+
 # 兼容旧名
 find_instance_max_z_points = find_instance_min_z_points
 
@@ -616,6 +684,45 @@ def find_instance_nearest_p1_x_points(
             }
         )
     return results
+
+
+def annotate_p1_x_distance(
+    items: list[dict],
+    p1_position_mm: np.ndarray | Sequence[float],
+    p1_rotation: np.ndarray | Sequence[Sequence[float]],
+) -> list[dict]:
+    """为每个点写入沿 P1 局部 X 的 |((p-p1)·X)|（mm）。"""
+    p1 = np.asarray(p1_position_mm, dtype=np.float64).reshape(3)
+    rot = np.asarray(p1_rotation, dtype=np.float64).reshape(3, 3)
+    x_axis = rot[:, 0]
+    x_norm = float(np.linalg.norm(x_axis))
+    if x_norm < 1e-12:
+        x_axis = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    else:
+        x_axis = x_axis / x_norm
+
+    out: list[dict] = []
+    for item in items:
+        row = dict(item)
+        pos = np.asarray(row.get("position_mm"), dtype=np.float64).reshape(3)
+        row["x_dist_mm"] = round(float(abs((pos - p1) @ x_axis)), 2)
+        out.append(row)
+    return out
+
+
+def select_nearest_along_p1_x(items: list[dict]) -> list[dict]:
+    """
+    按 |dx| = x_dist_mm（沿 P1-X）排序，只保留最近的 1 个；其余丢弃。
+    需要条目上已有 x_dist_mm。
+    """
+    if not items:
+        return []
+    ranked = sorted(items, key=lambda r: float(r.get("x_dist_mm", float("inf"))))
+    best = dict(ranked[0])
+    best["selected_by"] = "nearest_p1_x"
+    best["rank"] = 1
+    best["candidates"] = len(ranked)
+    return [best]
 
 
 def build_instance_pointcloud_files(
