@@ -1,6 +1,6 @@
 # 抓取点 REST API：`/api/v1/infer/grasp`
 
-与 Gradio **「SAM3 分割」** 页签同逻辑：实例分割 → 标记位 P1 → `q_i`（p_i 的 y±2mm 聚合）→ 沿 P1-X 取最近的抓取点 `q`。
+与 Gradio **「抓取 位姿估计」** 页签同逻辑：实例分割 → 标记位 P1 → `q_i`（p_i 的 y±2mm 聚合）→ 沿 P1-X 取最近的抓取点 `q`。
 
 算法细节见 [sam3_seg_tab.md](sam3_seg_tab.md)。
 

@@ -571,10 +571,10 @@ def run_sam3_seg_tab_inference(
 
 
 def build_sam3_seg_tab(depth_service: "DepthService") -> None:
-    """在 ``with gr.Tabs():`` 内调用，添加「SAM3 分割」页签。"""
+    """在 ``with gr.Tabs():`` 内调用，添加「抓取 位姿估计」页签。"""
     default_marker = load_marker_prompt() or DEFAULT_PLACE_MARKER_PROMPT
 
-    with gr.Tab("SAM3 分割"):
+    with gr.Tab("抓取 位姿估计"):
         gr.Markdown(
             "验证 **SAM3 文本分割** + **传感器深度点云**；可选再识别 **绿色标记位**，"
             "用 PEM 同款方法计算并展示 **P1**（对角线中心反投影 + 平面姿态）。"
@@ -628,7 +628,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                         value=DEFAULT_SAM3_TIMEOUT_S,
                         precision=0,
                     )
-                sam3_btn = gr.Button("开始 SAM3 分割", variant="primary")
+                sam3_btn = gr.Button("开始抓取位姿估计", variant="primary")
                 out_grasp = gr.Code(
                     label="抓取点 q · xyzrxryrz（mm / °）",
                     language="json",

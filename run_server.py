@@ -212,7 +212,7 @@ def create_app(model_dir: str, device: str) -> FastAPI:
 
     @app.post(
         "/api/v1/infer/grasp",
-        summary="抓取点 q（SAM3 分割 Tab 同款）",
+        summary="抓取点 q（抓取 位姿估计 Tab 同款）",
         tags=["grasp"],
     )
     async def infer_grasp_v1(

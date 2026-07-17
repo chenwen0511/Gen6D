@@ -1,4 +1,4 @@
-"""抓取点 q 推理：与 SAM3 分割 Tab 同逻辑，供 REST / UI 复用。"""
+"""抓取点 q 推理：与「抓取 位姿估计」Tab 同逻辑，供 REST / UI 复用。"""
 
 from __future__ import annotations
 
@@ -138,7 +138,7 @@ def infer_grasp(
     y_band_mm: float = 2.0,
 ) -> GraspInferResult:
     """
-    与「SAM3 分割」页签同款流水线：实例分割 → P1 → q_i → 沿 P1-X 最近 q。
+    与「抓取 位姿估计」页签同款流水线：实例分割 → P1 → q_i → 沿 P1-X 最近 q。
 
     :param sensor_depth: 传感器深度，单位 mm，形状 (H, W)
     :param intrinsics: 3×3 cam_K

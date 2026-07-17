@@ -23,7 +23,7 @@ bash start.sh restart    # 默认 :8000；可用 DEVICE=cpu
 | 页签 | 作用 |
 |------|------|
 | **深度估计** | 传感器深度 + DA3 估计 + 融合深度可视化 / 点云 |
-| **SAM3 分割** | 实例分割 + 标记位 P1 → 抓取点 `q`（`xyzrxryrz`） |
+| **抓取 位姿估计** | 实例分割 + 标记位 P1 → 抓取点 `q`（`xyzrxryrz`） |
 | **融合深度 + SAM-6D** | 融合或传感器深度 → SAM-6D（`seg_backend=sam3`）6D 位姿 |
 
 详细流程见 [doc/sam3_seg_tab.md](doc/sam3_seg_tab.md)。
@@ -39,7 +39,7 @@ bash start.sh restart    # 默认 :8000；可用 DEVICE=cpu
    - 可选深度来源：融合深度 / 原始传感器深度  
    - 文档：[doc/sam6d_rest_api.md](doc/sam6d_rest_api.md)、[doc/pem.md](doc/pem.md)
 
-2. **SAM3 分割 Tab**（`55236af`）  
+2. **抓取 位姿估计 Tab**（原 SAM3 分割，`55236af`）  
    - 传感器深度实例分色点云；绿色标记位 → **P1**（PEM 同款几何）  
    - 每实例：`p_i`（Z 最小）→ 预览 P1 / 实例点
 
@@ -104,7 +104,7 @@ RGB 图像 ──┬──► 分割模型 (YOLO / SAM2) ──► 分割掩码 
 ### 输出
 
 - **6D 位姿**（SAM-6D）：物体相对于相机的旋转 + 平移  
-- **抓取点 q**（SAM3 分割 Tab）：`[x, y, z, rx, ry, rz]`  
+- **抓取点 q**（抓取 位姿估计 Tab）：`[x, y, z, rx, ry, rz]`  
   - `x,y,z`：相机系位置，单位 **mm**  
   - `rx,ry,rz`：姿态，单位 **°**（由 P1 旋转按 ZYX 欧拉角换算）
 
@@ -143,7 +143,7 @@ D_metric_est = s · D_est + t
 
 | 文档 | 说明 |
 |------|------|
-| [doc/sam3_seg_tab.md](doc/sam3_seg_tab.md) | **SAM3 分割 Tab**：P1 / p_i / q_i / 抓取位姿 |
+| [doc/sam3_seg_tab.md](doc/sam3_seg_tab.md) | **抓取 位姿估计** Tab：P1 / p_i / q_i / 抓取位姿 |
 | [doc/grasp_api.md](doc/grasp_api.md) | **REST** `POST /api/v1/infer/grasp`（返回 `xyzrxryrz` + 可视化图） |
 | [doc/sam6d_rest_api.md](doc/sam6d_rest_api.md) | SAM-6D HTTP 服务 REST |
 | [doc/pem.md](doc/pem.md) | PEM / SAM-6D 集成说明 |
