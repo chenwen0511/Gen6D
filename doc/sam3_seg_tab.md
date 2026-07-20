@@ -53,7 +53,10 @@ RGB + 传感器深度 + camera.json
             剔除外点 → p_i（相机系 Z 最小 / 最近）
                   │
                   ▼
-            以 p_i 为球心、半径 8 mm 内的点 ──► 聚合中心 q_i
+            以 p_i 为球心、半径 8 mm 内的点
+                  │
+                  ▼
+            相机系 |y − p_i.y| ≤ 2 mm ──► 聚合中心 q_i
                   │
                   ▼
             有 P1 时：按沿 P1 局部 X 的 |((q−P1)·X)| 排序
@@ -114,7 +117,7 @@ RGB + 传感器深度 + camera.json
 - 黄球 / 短轴：P1
 - 彩色球 + RGB 轴：最终 q（姿态取自 P1；已烧进点云以便 Model3D 可见）
 
-详情 JSON 字段：`instance_qi` / `instance_qi_all`（含 `p_i_mm`、`q_i_mm`、`radius_mm` / `num_sphere` 等）。
+详情 JSON 字段：`instance_qi` / `instance_qi_all`（含 `p_i_mm`、`q_i_mm`、`radius_mm`、`y_band_mm`、`num_sphere` / `num_band` 等）。
 
 ---
 
@@ -124,7 +127,7 @@ RGB + 传感器深度 + camera.json
 |------|------|
 | **P1** | 绿色方标标记位中心位姿（位置 + 平面姿态） |
 | **p_i** | 实例 i 剔除外点后，相机系 **Z 最小**点 |
-| **q_i** | 以 **p_i 为球心、半径 8 mm** 内点的均值中心（UI 展示用） |
+| **q_i** | 球半径 **8 mm** 内点，再取相机 **y±2 mm** 带内点的均值中心（UI 展示用） |
 | **p_ix** | 实例内沿 **P1 局部 X** 距 P1 最近的点（对照路径） |
 | **q** | 全部 q_i 中沿 P1-X `|dx|` **最近**的那一个 → 夹爪抓取点 |
 

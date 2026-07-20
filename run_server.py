@@ -156,6 +156,7 @@ def create_app(model_dir: str, device: str) -> FastAPI:
         mask_threshold: float | None,
         timeout_s: float | None,
         radius_mm: float,
+        y_band_mm: float,
     ):
         try:
             rgb_image = Image.open(io.BytesIO(await rgb.read())).convert("RGB")
@@ -196,6 +197,7 @@ def create_app(model_dir: str, device: str) -> FastAPI:
                 ),
                 timeout_s=timeout_s if timeout_s is not None else DEFAULT_SAM3_TIMEOUT_S,
                 radius_mm=float(radius_mm),
+                y_band_mm=float(y_band_mm),
             )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"grasp infer failed: {exc}") from exc
@@ -231,12 +233,11 @@ def create_app(model_dir: str, device: str) -> FastAPI:
         threshold: Annotated[float | None, Form(description="SAM3 threshold")] = None,
         mask_threshold: Annotated[float | None, Form(description="SAM3 mask_threshold")] = None,
         timeout_s: Annotated[float | None, Form(description="SAM3 超时秒")] = None,
-        radius_mm: Annotated[float, Form(description="以 p_i 为球心的聚合半径（mm）")] = 8.0,
+        radius_mm: Annotated[float, Form(description="以 p_i 为球心的初筛半径（mm）")] = 8.0,
         y_band_mm: Annotated[
-            float | None, Form(description="兼容旧参数，等同 radius_mm；优先用 radius_mm")
-        ] = None,
+            float, Form(description="球筛后相机 y ± 带宽（mm），默认 2.0")
+        ] = 2.0,
     ):
-        r = float(radius_mm if y_band_mm is None else y_band_mm)
         return await _infer_grasp_handler(
             rgb,
             depth,
@@ -249,7 +250,8 @@ def create_app(model_dir: str, device: str) -> FastAPI:
             threshold,
             mask_threshold,
             timeout_s,
-            r,
+            float(radius_mm),
+            float(y_band_mm),
         )
 
     @app.post("/infer/grasp", include_in_schema=True, tags=["grasp"])
@@ -266,10 +268,9 @@ def create_app(model_dir: str, device: str) -> FastAPI:
         mask_threshold: Annotated[float | None, Form()] = None,
         timeout_s: Annotated[float | None, Form()] = None,
         radius_mm: Annotated[float, Form()] = 8.0,
-        y_band_mm: Annotated[float | None, Form()] = None,
+        y_band_mm: Annotated[float, Form()] = 2.0,
     ):
         """短别名，等价于 ``/api/v1/infer/grasp``。"""
-        r = float(radius_mm if y_band_mm is None else y_band_mm)
         return await _infer_grasp_handler(
             rgb,
             depth,
@@ -282,7 +283,8 @@ def create_app(model_dir: str, device: str) -> FastAPI:
             threshold,
             mask_threshold,
             timeout_s,
-            r,
+            float(radius_mm),
+            float(y_band_mm),
         )
 
     demo = build_ui(service)

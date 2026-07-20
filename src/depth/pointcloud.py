@@ -565,15 +565,17 @@ def find_instance_qi_from_pi_sphere(
     intrinsics: np.ndarray,
     *,
     radius_mm: float = 8.0,
+    y_band_mm: float = 2.0,
     std_ratio: float = 2.0,
     z_mad_ratio: float = 2.5,
 ) -> list[dict]:
     """
     各实例：先按原规则取 p_i（剔除外点后 Z 最小），再以 p_i 为球心、
-    半径 radius_mm 内的点求均值中心 q_i。``position_mm`` 为 q_i（供 UI 展示）。
+    半径 radius_mm 内的点，再取相机系 |y - p_i.y| ≤ y_band_mm 的点求均值中心 q_i。
+    若 y 带内无点则回退为球内点均值。``position_mm`` 为 q_i（供 UI 展示）。
 
-    :return: [{instance_id, position_mm(=q_i), p_i_mm, q_i_mm, radius_mm,
-               num_sphere, num_raw, num_inlier, z_mm}, ...]
+    :return: [{instance_id, position_mm(=q_i), p_i_mm, q_i_mm, radius_mm, y_band_mm,
+               num_sphere, num_band, num_raw, num_inlier, z_mm}, ...]
     """
     points, ids = depth_instance_points_camera(depth, instance_id_map, intrinsics)
     results: list[dict] = []
@@ -581,6 +583,7 @@ def find_instance_qi_from_pi_sphere(
         return results
 
     radius = float(radius_mm)
+    band = float(y_band_mm)
     for inst_id in sorted(int(v) for v in np.unique(ids) if int(v) > 0):
         pts = points[ids == inst_id]
         raw_n = int(pts.shape[0])
@@ -589,15 +592,22 @@ def find_instance_qi_from_pi_sphere(
             continue
         idx = int(np.argmin(inliers[:, 2]))
         p_i = inliers[idx]
+        y_ref = float(p_i[1])
         dist = np.linalg.norm(inliers - p_i, axis=1)
         sphere_mask = dist <= radius
         sphere_pts = inliers[sphere_mask]
-        if sphere_pts.shape[0] == 0:
+        num_sphere = int(sphere_pts.shape[0])
+        if num_sphere == 0:
             q_i = p_i
-            num_sphere = 0
+            num_band = 0
         else:
-            q_i = sphere_pts.mean(axis=0)
-            num_sphere = int(sphere_pts.shape[0])
+            band_mask = np.abs(sphere_pts[:, 1] - y_ref) <= band
+            band_pts = sphere_pts[band_mask]
+            num_band = int(band_pts.shape[0])
+            if num_band == 0:
+                q_i = sphere_pts.mean(axis=0)
+            else:
+                q_i = band_pts.mean(axis=0)
         results.append(
             {
                 "instance_id": inst_id,
@@ -617,10 +627,10 @@ def find_instance_qi_from_pi_sphere(
                     round(float(q_i[2]), 2),
                 ],
                 "radius_mm": radius,
+                "y_band_mm": band,
+                "y_ref_mm": round(y_ref, 2),
                 "num_sphere": num_sphere,
-                # 兼容旧字段名
-                "y_band_mm": radius,
-                "num_band": num_sphere,
+                "num_band": num_band,
                 "z_mm": round(float(q_i[2]), 2),
                 "num_raw": raw_n,
                 "num_inlier": int(inliers.shape[0]),
@@ -634,18 +644,18 @@ def find_instance_qi_from_pi_y_band(
     instance_id_map: np.ndarray,
     intrinsics: np.ndarray,
     *,
-    y_band_mm: float = 8.0,
-    radius_mm: float | None = None,
+    y_band_mm: float = 2.0,
+    radius_mm: float = 8.0,
     std_ratio: float = 2.0,
     z_mad_ratio: float = 2.5,
 ) -> list[dict]:
-    """兼容旧名：现以 p_i 为球心、半径 radius_mm（默认 8）聚合 q_i。"""
-    r = float(radius_mm) if radius_mm is not None else float(y_band_mm)
+    """兼容旧名：球半径 radius_mm + 相机 y ± y_band_mm 两步聚合 q_i。"""
     return find_instance_qi_from_pi_sphere(
         depth,
         instance_id_map,
         intrinsics,
-        radius_mm=r,
+        radius_mm=float(radius_mm),
+        y_band_mm=float(y_band_mm),
         std_ratio=std_ratio,
         z_mad_ratio=z_mad_ratio,
     )

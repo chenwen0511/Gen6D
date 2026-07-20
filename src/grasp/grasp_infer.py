@@ -135,8 +135,8 @@ def infer_grasp(
     threshold: Optional[float] = None,
     mask_threshold: Optional[float] = None,
     timeout_s: Optional[float] = None,
-    y_band_mm: float = 8.0,
-    radius_mm: float | None = None,
+    radius_mm: float = 8.0,
+    y_band_mm: float = 2.0,
 ) -> GraspInferResult:
     """
     与「抓取 位姿估计」页签同款流水线：实例分割 → P1 → q_i → 沿 P1-X 最近 q。
@@ -271,9 +271,12 @@ def infer_grasp(
     if id_map is None:
         id_map = np.zeros((depth_h, depth_w), dtype=np.uint8)
 
-    qi_radius = float(radius_mm) if radius_mm is not None else float(y_band_mm)
     qi_all = find_instance_qi_from_pi_sphere(
-        sensor_depth, id_map, intrinsics, radius_mm=qi_radius
+        sensor_depth,
+        id_map,
+        intrinsics,
+        radius_mm=float(radius_mm),
+        y_band_mm=float(y_band_mm),
     )
     rotation_src = p1_pose.rotation if p1_pose is not None else np.eye(3, dtype=np.float64)
     if p1_pose is not None and qi_all:
@@ -326,9 +329,10 @@ def infer_grasp(
             "p_i_mm": q.get("p_i_mm"),
             "q_i_mm": q.get("q_i_mm") or q.get("position_mm"),
             "x_dist_mm": q.get("x_dist_mm"),
-            "num_sphere": q.get("num_sphere") or q.get("num_band"),
-            "radius_mm": q.get("radius_mm") or q.get("y_band_mm"),
-            "y_band_mm": q.get("radius_mm") or q.get("y_band_mm"),
+            "num_sphere": q.get("num_sphere"),
+            "num_band": q.get("num_band"),
+            "radius_mm": q.get("radius_mm"),
+            "y_band_mm": q.get("y_band_mm"),
             "rotation_from": q.get("rotation_from"),
             "role": "gripper_grasp_point",
         },
@@ -354,8 +358,8 @@ def infer_grasp(
             "sam3_api": sam_api,
             "threshold": thr,
             "mask_threshold": mask_thr,
-            "radius_mm": qi_radius,
-            "y_band_mm": qi_radius,
+            "radius_mm": float(radius_mm),
+            "y_band_mm": float(y_band_mm),
             "detections": _detection_summary(detections),
         },
     )
