@@ -40,7 +40,7 @@ bash start.sh restart    # 默认 :8000；可用 DEVICE=cpu
    - 文档：[doc/sam6d_rest_api.md](doc/sam6d_rest_api.md)、[doc/pem.md](doc/pem.md)
 
 2. **抓取 位姿估计 Tab**（原 SAM3 分割，`55236af`）  
-   - 传感器深度实例分色点云；绿色标记位 → **P1**（PEM 同款几何）  
+   - 传感器深度实例分色点云；货架孔洞 + 蓝色 LED 标记位 → **P1**  
    - 每实例：`p_i`（Z 最小）→ 预览 P1 / 实例点
 
 3. **抓取点 q + 预览拆分**（`2c59e71`）  

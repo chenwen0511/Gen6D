@@ -26,7 +26,9 @@
     "depth_source": "fused"
   },
   "place": {
-    "marker_prompt": "the green square slot marker on the metal rack",
+    "hole_prompt": "All small circular through holes on the gray flat metal shelf panel in horizontal",
+    "led_prompt": "Small glowing circular blue LED indicator light on the gray metal shelf plate",
+    "marker_prompt": "Small glowing circular blue LED indicator light on the gray metal shelf plate",
     "sam3_threshold": 0.41,
     "sam3_mask_threshold": 0.5,
     "sam3_timeout_s": 300,

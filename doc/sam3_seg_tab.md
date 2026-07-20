@@ -27,7 +27,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/infer/grasp" \
 | 传感器深度 | `uint16` PNG（mm） |
 | `camera.json` | 含 `cam_K`、可选 `depth_scale` |
 | 实例提示词 | SAM3 文本提示（料盘 / 圆盘等） |
-| 标记位提示词 | 可选；默认见 `prompt/green_square_marker.txt` |
+| 标记位提示词 | 可选；默认使用 `prompt/shelf_holes.txt` 与 `prompt/blue_led_marker.txt` |
 
 依赖外部服务：
 
@@ -42,10 +42,10 @@ RGB + 传感器深度 + camera.json
         │
         ├─► SAM3（实例提示词）──► 实例 mask / bbox / id_map
         │
-        ├─► SAM3（标记提示词，可选）──► 标记 mask
+        ├─► SAM3（孔洞提示词 + LED 提示词，可选）
         │         │
         │         ▼
-        │   四角对角线中心反投影 + 平面姿态 ──► P1（位置 + 旋转）
+        │   孔洞定水平 + LED 圆心定中心 + 外切正方形 ABCD 深度均值 ──► P1（位置 + 旋转）
         │
         └─► 各实例点云（传感器深度反投影）
                   │
@@ -125,7 +125,7 @@ RGB + 传感器深度 + camera.json
 
 | 符号 | 含义 |
 |------|------|
-| **P1** | 绿色方标标记位中心位姿（位置 + 平面姿态） |
+| **P1** | 货架面板蓝色 LED 标记位中心位姿（孔洞定水平，LED 圆心定中心） |
 | **p_i** | 实例 i 剔除外点后，相机系 **Z 最小**点 |
 | **q_i** | 球半径 **8 mm** 内点，再取相机 **y±2 mm** 带内点的均值中心（UI 展示用） |
 | **p_ix** | 实例内沿 **P1 局部 X** 距 P1 最近的点（对照路径） |
@@ -142,7 +142,7 @@ RGB + 传感器深度 + camera.json
 | `src/grasp/place_geometry.py` | 标记几何 / 反投影 / 姿态（移植自 PEM） |
 | `src/depth/pointcloud.py` | 实例点云、`find_instance_qi_from_pi_sphere`、P1-X 筛选 |
 | `src/grasp/sam3.py` | SAM3 客户端、`render_sam3_mask_bbox_previews` |
-| `prompt/green_square_marker.txt` | 默认标记提示词 |
+| `prompt/shelf_holes.txt` / `prompt/blue_led_marker.txt` | 默认孔洞 / LED 提示词 |
 | `config/grasp_config.json` | `sam3` / `place` / `pem` 默认配置 |
 
 ---

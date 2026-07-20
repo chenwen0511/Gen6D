@@ -113,10 +113,26 @@ SAM6D_DEPTH_SOURCE = _env_str(
 )
 
 _place = _section("place")
+_default_hole_prompt = (
+    "All small circular through holes on the gray flat metal shelf panel in horizontal"
+)
+_default_led_prompt = (
+    "Small glowing circular blue LED indicator light on the gray metal shelf plate"
+)
+PLACE_HOLE_PROMPT = _env_str(
+    "GENPOSE2_PLACE_HOLE_PROMPT",
+    "PLACE_HOLE_PROMPT",
+    default=_cfg_str(_place, "hole_prompt", _default_hole_prompt),
+)
+PLACE_LED_PROMPT = _env_str(
+    "GENPOSE2_PLACE_LED_PROMPT",
+    "PLACE_LED_PROMPT",
+    default=_cfg_str(_place, "led_prompt", _default_led_prompt),
+)
 PLACE_MARKER_PROMPT = _env_str(
     "GENPOSE2_PLACE_MARKER_PROMPT",
     "PLACE_MARKER_PROMPT",
-    default=_cfg_str(_place, "marker_prompt", "the green square slot marker on the metal rack"),
+    default=_cfg_str(_place, "marker_prompt", _default_led_prompt),
 )
 PLACE_SAM3_THRESHOLD = _env_float(
     "GENPOSE2_PLACE_SAM3_THRESHOLD",
@@ -159,6 +175,8 @@ DEFAULT_SAM6D_SEG_BACKEND = SAM6D_SEG_BACKEND
 DEFAULT_SAM6D_SEGMENTOR_MODEL = SAM6D_SEGMENTOR_MODEL
 DEFAULT_SAM6D_DET_SCORE_THRESH = SAM6D_DET_SCORE_THRESH
 DEFAULT_SAM6D_DEPTH_SOURCE = SAM6D_DEPTH_SOURCE
+DEFAULT_PLACE_HOLE_PROMPT = PLACE_HOLE_PROMPT
+DEFAULT_PLACE_LED_PROMPT = PLACE_LED_PROMPT
 DEFAULT_PLACE_MARKER_PROMPT = PLACE_MARKER_PROMPT
 DEFAULT_PLACE_SAM3_THRESHOLD = PLACE_SAM3_THRESHOLD
 DEFAULT_PLACE_SAM3_MASK_THRESHOLD = PLACE_SAM3_MASK_THRESHOLD

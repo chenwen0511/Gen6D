@@ -1,6 +1,6 @@
 # 抓取点 REST API：`/api/v1/infer/grasp`
 
-与 Gradio **「抓取 位姿估计」** 页签同逻辑：实例分割 → 标记位 P1 → `q_i`（球半径 8mm → 相机 y±2mm 聚合）→ 沿 P1-X 取最近的抓取点 `q`。
+与 Gradio **「抓取 位姿估计」** 页签同逻辑：实例分割 → 货架孔洞 + 蓝色 LED 定 **P1** → `q_i`（球半径 8mm → 相机 y±2mm 聚合）→ 沿 P1-X 取最近的抓取点 `q`。
 
 算法细节见 [sam3_seg_tab.md](sam3_seg_tab.md)。
 
@@ -28,8 +28,10 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
 | `camera` | file | 条件 | `camera.json` 文件（与 `camera_json` 二选一） |
 | `camera_json` | string | 条件 | 内参 JSON 字符串（与 `camera` 二选一） |
 | `prompt` | string | 否 | 实例 SAM3 提示词（默认读配置） |
-| `marker_prompt` | string | 否 | 标记位提示词 |
-| `enable_marker_p1` | bool | 否 | 默认 `true` |
+| `hole_prompt` | string | 否 | 货架面板圆形孔洞 SAM3 提示词（定水平方向） |
+| `led_prompt` | string | 否 | 蓝色 LED 圆形标记 SAM3 提示词（定 P1 像素中心） |
+| `marker_prompt` | string | 否 | 兼容旧字段，等同 `led_prompt` |
+| `enable_marker_p1` | bool | 否 | 是否识别孔洞 + LED 并计算 P1，默认 `true` |
 | `sam3_api_url` | string | 否 | SAM3 服务 URL |
 | `threshold` | float | 否 | SAM3 threshold |
 | `mask_threshold` | float | 否 | SAM3 mask_threshold |

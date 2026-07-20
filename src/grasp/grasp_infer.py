@@ -18,10 +18,10 @@ from src.depth.pointcloud import (
 )
 from src.depth.service import load_intrinsics_from_dict, load_sensor_depth_from_image
 from src.grasp.marker import (
-    estimate_p1_from_marker,
-    load_marker_prompt,
+    infer_p1_from_shelf_panel,
+    load_hole_prompt,
+    load_led_prompt,
     render_p1_and_pi_preview,
-    select_marker_detection,
 )
 from src.grasp.place_geometry import CameraIntrinsics, Pose6D, rotation_matrix_to_euler_zyx
 from src.grasp.sam3 import (
@@ -37,6 +37,8 @@ from src.grasp.sam3 import (
     render_sam3_mask_bbox_previews,
 )
 from src.grasp.settings import (
+    DEFAULT_PLACE_HOLE_PROMPT,
+    DEFAULT_PLACE_LED_PROMPT,
     DEFAULT_PLACE_MARKER_PROMPT,
     DEFAULT_PLACE_SAM3_MASK_THRESHOLD,
     DEFAULT_PLACE_SAM3_THRESHOLD,
@@ -130,6 +132,8 @@ def infer_grasp(
     *,
     prompt: Optional[str] = None,
     marker_prompt: Optional[str] = None,
+    hole_prompt: Optional[str] = None,
+    led_prompt: Optional[str] = None,
     enable_marker_p1: bool = True,
     api_url: Optional[str] = None,
     threshold: Optional[float] = None,
@@ -215,52 +219,34 @@ def infer_grasp(
     p1_vis: Optional[Image.Image] = None
     p1_pose: Optional[Pose6D] = None
     if enable_marker_p1:
-        marker_prompt_text = (
-            marker_prompt or load_marker_prompt() or DEFAULT_PLACE_MARKER_PROMPT
+        hole_prompt_text = (
+            hole_prompt or load_hole_prompt() or DEFAULT_PLACE_HOLE_PROMPT
         ).strip()
-        marker_payload["prompt"] = marker_prompt_text
+        led_prompt_text = (
+            led_prompt
+            or marker_prompt
+            or load_led_prompt()
+            or DEFAULT_PLACE_LED_PROMPT
+        ).strip()
+        marker_payload["hole_prompt"] = hole_prompt_text
+        marker_payload["led_prompt"] = led_prompt_text
         try:
-            t_m = time.perf_counter()
-            marker_result, _ = infer_sam3_with_image(
+            p1_pose, marker_payload, p1_vis = infer_p1_from_shelf_panel(
                 image_for_seg,
-                prompt=marker_prompt_text,
+                sensor_depth,
+                place_camera,
+                (depth_w, depth_h),
+                hole_prompt=hole_prompt_text,
+                led_prompt=led_prompt_text,
                 api_url=sam_api,
                 threshold=float(thr if thr is not None else DEFAULT_PLACE_SAM3_THRESHOLD),
                 mask_threshold=float(
                     mask_thr if mask_thr is not None else DEFAULT_PLACE_SAM3_MASK_THRESHOLD
                 ),
                 timeout_s=timeout,
-                return_vis_base64=True,
-                filter_by_point=False,
             )
-            marker_payload["sam3_elapsed_s"] = round(time.perf_counter() - t_m, 3)
-            marker_payload["num_detections"] = marker_result.num_detections
-            marker_payload["detections"] = _detection_summary(list(marker_result.detections or []))
-
-            if not marker_result.detections:
-                marker_payload["success"] = False
-                marker_payload["message"] = "SAM3 未检测到标记位"
-            else:
-                det, selection = select_marker_detection(
-                    list(marker_result.detections),
-                    (depth_w, depth_h),
-                    image_for_seg,
-                )
-                marker_payload["selection"] = selection
-                if det is None:
-                    marker_payload["success"] = False
-                    marker_payload["message"] = "未能选出标记位实例"
-                else:
-                    marker_mask = _decode_detection_mask(det, (depth_w, depth_h))
-                    p1_pose, p1_meta, p1_vis = estimate_p1_from_marker(
-                        image_for_seg,
-                        marker_mask,
-                        sensor_depth,
-                        place_camera,
-                    )
-                    marker_payload["success"] = True
-                    marker_payload["p1"] = p1_pose.to_dict()
-                    marker_payload["p1_meta"] = p1_meta
+            if p1_pose is None and "message" not in marker_payload:
+                marker_payload["message"] = "P1 计算失败"
         except Exception as exc:
             logger.exception("marker p1 failed")
             marker_payload["success"] = False

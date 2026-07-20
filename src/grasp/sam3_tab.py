@@ -36,10 +36,10 @@ from src.depth.service import (
 from src.grasp.grasp_infer import format_grasp_xyzrxryrz
 from src.grasp.marker import (
     camera_from_path,
-    estimate_p1_from_marker,
-    load_marker_prompt,
+    infer_p1_from_shelf_panel,
+    load_hole_prompt,
+    load_led_prompt,
     render_p1_and_pi_preview,
-    select_marker_detection,
 )
 from src.grasp.sam3 import (
     DEFAULT_SAM3_API_URL,
@@ -55,9 +55,12 @@ from src.grasp.sam3 import (
     render_sam3_mask_bbox_previews,
 )
 from src.grasp.settings import (
+    DEFAULT_PLACE_HOLE_PROMPT,
+    DEFAULT_PLACE_LED_PROMPT,
     DEFAULT_PLACE_MARKER_PROMPT,
     DEFAULT_PLACE_SAM3_MASK_THRESHOLD,
     DEFAULT_PLACE_SAM3_THRESHOLD,
+    DEFAULT_PLACE_SAM3_TIMEOUT_S,
 )
 
 if TYPE_CHECKING:
@@ -269,7 +272,8 @@ def run_sam3_seg_tab_inference(
     depth_file: Any,
     camera_file: Any,
     prompt: str,
-    marker_prompt: str,
+    hole_prompt: str,
+    led_prompt: str,
     enable_marker_p1: bool,
     api_url: str,
     threshold: float,
@@ -378,55 +382,32 @@ def run_sam3_seg_tab_inference(
         except Exception as exc:
             logger.exception("build instance mask failed: %s", exc)
 
-    # --- 2) 标记位 → P1（可选，独立 SAM3 提示词）---
+    # --- 2) 货架孔洞 + 蓝色 LED → P1（可选，两次 SAM3）---
     marker_payload: Dict[str, Any] = {"enabled": bool(enable_marker_p1)}
     p1_vis: Optional[Image.Image] = None
     p1_pose = None
     if enable_marker_p1:
-        marker_prompt_text = (marker_prompt or load_marker_prompt() or DEFAULT_PLACE_MARKER_PROMPT).strip()
-        marker_payload["prompt"] = marker_prompt_text
+        hole_prompt_text = (hole_prompt or load_hole_prompt() or DEFAULT_PLACE_HOLE_PROMPT).strip()
+        led_prompt_text = (led_prompt or load_led_prompt() or DEFAULT_PLACE_LED_PROMPT).strip()
+        marker_payload["hole_prompt"] = hole_prompt_text
+        marker_payload["led_prompt"] = led_prompt_text
         try:
-            t_m = time.perf_counter()
-            marker_result, _ = infer_sam3_with_image(
+            p1_pose, marker_payload, p1_vis = infer_p1_from_shelf_panel(
                 image_for_seg,
-                prompt=marker_prompt_text,
+                sensor_depth,
+                place_camera,
+                (depth_w, depth_h),
+                hole_prompt=hole_prompt_text,
+                led_prompt=led_prompt_text,
                 api_url=sam_api,
                 threshold=float(threshold if threshold is not None else DEFAULT_PLACE_SAM3_THRESHOLD),
                 mask_threshold=float(
                     mask_threshold if mask_threshold is not None else DEFAULT_PLACE_SAM3_MASK_THRESHOLD
                 ),
                 timeout_s=float(timeout_s),
-                return_vis_base64=True,
-                filter_by_point=False,
             )
-            marker_payload["sam3_elapsed_s"] = round(time.perf_counter() - t_m, 3)
-            marker_payload["num_detections"] = marker_result.num_detections
-            marker_payload["detections"] = _detection_summary(list(marker_result.detections or []))
-
-            if not marker_result.detections:
-                marker_payload["success"] = False
-                marker_payload["message"] = "SAM3 未检测到标记位"
-            else:
-                det, selection = select_marker_detection(
-                    list(marker_result.detections),
-                    (depth_w, depth_h),
-                    image_for_seg,
-                )
-                marker_payload["selection"] = selection
-                if det is None:
-                    marker_payload["success"] = False
-                    marker_payload["message"] = "未能选出标记位实例"
-                else:
-                    marker_mask = _decode_detection_mask(det, (depth_w, depth_h))
-                    p1_pose, p1_meta, p1_vis = estimate_p1_from_marker(
-                        image_for_seg,
-                        marker_mask,
-                        sensor_depth,
-                        place_camera,
-                    )
-                    marker_payload["success"] = True
-                    marker_payload["p1"] = p1_pose.to_dict()
-                    marker_payload["p1_meta"] = p1_meta
+            if p1_pose is None and "message" not in marker_payload:
+                marker_payload["message"] = "P1 计算失败"
         except Exception as exc:
             logger.exception("marker p1 failed: %s", exc)
             marker_payload["success"] = False
@@ -576,12 +557,13 @@ def run_sam3_seg_tab_inference(
 
 def build_sam3_seg_tab(depth_service: "DepthService") -> None:
     """在 ``with gr.Tabs():`` 内调用，添加「抓取 位姿估计」页签。"""
-    default_marker = load_marker_prompt() or DEFAULT_PLACE_MARKER_PROMPT
+    default_hole = load_hole_prompt() or DEFAULT_PLACE_HOLE_PROMPT
+    default_led = load_led_prompt() or DEFAULT_PLACE_LED_PROMPT
 
     with gr.Tab("抓取 位姿估计"):
         gr.Markdown(
-            "验证 **SAM3 文本分割** + **传感器深度点云**；可选再识别 **绿色标记位**，"
-            "用 PEM 同款方法计算并展示 **P1**（对角线中心反投影 + 平面姿态）。"
+            "验证 **SAM3 文本分割** + **传感器深度点云**；可选识别 **货架面板孔洞**（定水平）"
+            "与 **蓝色 LED**（定 P1 中心 + 外接正方形四角深度）。"
         )
         with gr.Row():
             with gr.Column(scale=1):
@@ -603,12 +585,17 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                     lines=3,
                 )
                 enable_marker = gr.Checkbox(
-                    label="识别标记位并计算 P1",
+                    label="识别孔洞 + 蓝色 LED 并计算 P1",
                     value=True,
                 )
-                marker_prompt = gr.Textbox(
-                    label="标记位提示词 marker_prompt",
-                    value=default_marker,
+                hole_prompt = gr.Textbox(
+                    label="货架孔洞提示词 hole_prompt",
+                    value=default_hole,
+                    lines=2,
+                )
+                led_prompt = gr.Textbox(
+                    label="蓝色 LED 提示词 led_prompt",
+                    value=default_led,
                     lines=2,
                 )
                 with gr.Accordion("SAM3 推理参数", open=True):
@@ -647,7 +634,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                 out_seg_bbox = gr.Image(type="pil", label="SAM3 实例 bbox", height=200)
                 out_p1 = gr.Image(
                     type="pil",
-                    label="标记位 P1（mask / 角点 / 坐标轴）",
+                    label="P1（孔洞水平 + 蓝色 LED + 外接正方形 ABCD）",
                     height=220,
                 )
                 out_pi = gr.Image(
@@ -688,7 +675,8 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                 sam3_depth,
                 sam3_camera,
                 sam3_prompt,
-                marker_prompt,
+                hole_prompt,
+                led_prompt,
                 enable_marker,
                 sam3_api,
                 sam3_threshold,
@@ -715,10 +703,10 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
             **说明**
             - 实例分割：SAM3 `POST /infer` + 文本提示，默认 API `{DEFAULT_SAM3_API_URL}`
               （快速预览拆成 **mask** / **bbox** 两张图）
-            - **标记位 P1**（与 PEM_service 一致）：
-              1. 用 marker 提示词分割 → 按绿度/长宽比选出标记
-              2. 四角 A–D 对角线交点为中心 UV，邻域深度反投影得位置
-              3. 辅助点 A'–D' 拟合平面法向 → X/Y/Z 姿态
+            - **标记位 P1**（货架面板）：
+              1. 孔洞提示词分割所有圆形通孔 → 左右孔洞中心连线定 **水平 X**
+              2. 蓝色 LED 提示词分割发光圆 → **圆心** 为 P1 像素中心
+              3. LED 外接正方形四角 **A–D** 深度均值 → P1 深度；LED 平面法向 + 孔洞水平 → 姿态
             - **抓取点 q**：最终保留的 q_i；左侧 JSON 的 `xyzrxryrz = [x,y,z,rx,ry,rz]`（xyz=mm，姿态=°，ZYX）
             - **实例 q_i**：先求 **p_i（Z 最小）** → **球 8mm** → **相机 y±2mm** 聚合中心 **q_i**（UI 展示 q_i）
               → 有 P1 时再按 **P1-X |dx|** **只显示最近的 1 个**
@@ -726,6 +714,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
             - **快速预览**：q_i / p_ix 图均只画选出的那一个点；候选在 JSON `instance_qi_all` / `instance_pi_x_all`
             - 点云仅用 **原始传感器深度**；3D 标记为 **q_i**（彩色密集球 + RGB 三色射线）
             - 黄球/短轴 = 标记 **P1**；请同时核对 JSON 的 `p_i_mm` / `q_i_mm` / `instance_qi`
-            - 默认标记提示词：`{default_marker}`
+            - 默认孔洞提示词：`{default_hole}`
+            - 默认 LED 提示词：`{default_led}`
             """
         )
