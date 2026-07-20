@@ -6,7 +6,7 @@
     "timeout_s": 120
   },
   "sam3": {
-    "api_url": "http://192.168.100.220:18002/infer",
+    "api_url": "http://192.168.100.220:18003/infer",
     "prompt": "Plastic Reel Connected With Tape",
     "threshold": 0.41,
     "mask_threshold": 0.5,

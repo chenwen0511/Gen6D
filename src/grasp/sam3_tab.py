@@ -24,7 +24,7 @@ from src.depth.pointcloud import (
     export_pointcloud_ply,
     export_scene_glb,
     find_instance_nearest_p1_x_points,
-    find_instance_qi_from_pi_y_band,
+    find_instance_qi_from_pi_sphere,
     inject_axis_points,
     select_nearest_along_p1_x,
 )
@@ -151,8 +151,8 @@ def _build_scene_with_optional_p1(
         max_points=depth_service.max_points,
     )
 
-    # p_i 规则不变 → y±2mm 带内聚合得 q_i；UI / 点云展示用 q_i
-    qi_all = find_instance_qi_from_pi_y_band(sensor_depth, id_map, intrinsics, y_band_mm=2.0)
+    # p_i 规则不变 → 以 p_i 为球心半径 8mm 聚合得 q_i；UI / 点云展示用 q_i
+    qi_all = find_instance_qi_from_pi_sphere(sensor_depth, id_map, intrinsics, radius_mm=8.0)
     rotation_src = p1_pose.rotation if p1_pose is not None else np.eye(3, dtype=np.float64)
 
     if p1_pose is not None and qi_all:
@@ -254,7 +254,7 @@ def _build_scene_with_optional_p1(
         "pi_count": len(qi_list),
         "pi_candidate_count": len(qi_all),
         "pi_note": (
-            "各实例：p_i=剔除外点后 Z 最小 → 取相机系 |y-p_i.y|≤2mm 点聚合中心 q_i；"
+            "各实例：p_i=剔除外点后 Z 最小 → 以 p_i 为球心半径 8mm 内点聚合中心 q_i；"
             "有 P1 时再按 q_i 的 P1-X |dx| 只保留最近 1 个用于显示；"
             "JSON 含 p_i_mm / q_i_mm，候选见 instance_qi_all"
         ),
@@ -525,8 +525,9 @@ def run_sam3_seg_tab_inference(
                 "p_i_mm": q.get("p_i_mm"),
                 "q_i_mm": q.get("q_i_mm") or q.get("position_mm"),
                 "x_dist_mm": q.get("x_dist_mm"),
-                "num_band": q.get("num_band"),
-                "y_band_mm": q.get("y_band_mm"),
+                "num_sphere": q.get("num_sphere") or q.get("num_band"),
+                "radius_mm": q.get("radius_mm") or q.get("y_band_mm"),
+                "y_band_mm": q.get("radius_mm") or q.get("y_band_mm"),
                 "rotation_from": q.get("rotation_from", "p1" if p1_pose is not None else "identity"),
                 "role": "gripper_grasp_point",
             },
@@ -648,7 +649,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                 )
                 out_pi = gr.Image(
                     type="pil",
-                    label="P1 + 最近 q_i（p_i→y±2mm 聚合；按 P1-X 仅 1 个）",
+                    label="P1 + 最近 q_i（p_i 球半径 8mm 聚合；按 P1-X 仅 1 个）",
                     height=240,
                 )
                 out_pix = gr.Image(
@@ -660,7 +661,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
         gr.Markdown("### 3D 点云（传感器深度 · 实例分色 · P1 / q_i 坐标轴）")
         gr.Markdown(
             "> **灰色**=背景；**彩色**=各 SAM3 实例；"
-            "每实例先求 **p_i（Z 最小）**，再对 **|y−p_i.y|≤2mm** 点聚合得 **q_i** 用于展示；"
+            "每实例先求 **p_i（Z 最小）**，再以 p_i 为球心、**半径 8mm** 内点聚合得 **q_i** 用于展示；"
             "有 P1 时再按 q_i 的 P1-X |dx| **只保留最近 1 个**。"
             "黄球/短轴 = 标记 P1。详情见 JSON `instance_qi`（含 `p_i_mm` / `q_i_mm`）。"
         )
@@ -716,7 +717,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
               2. 四角 A–D 对角线交点为中心 UV，邻域深度反投影得位置
               3. 辅助点 A'–D' 拟合平面法向 → X/Y/Z 姿态
             - **抓取点 q**：最终保留的 q_i；左侧 JSON 的 `xyzrxryrz = [x,y,z,rx,ry,rz]`（xyz=mm，姿态=°，ZYX）
-            - **实例 q_i**：先按原规则求 **p_i（Z 最小）** → 取相机系 **|y−p_i.y|≤2mm** 点聚合中心 **q_i**（UI 展示 q_i）
+            - **实例 q_i**：先按原规则求 **p_i（Z 最小）** → 以 p_i 为球心、**半径 8mm** 内点聚合中心 **q_i**（UI 展示 q_i）
               → 有 P1 时再按 **P1-X |dx|** **只显示最近的 1 个**
             - **实例 p_ix**：各实例沿 P1-X 最近点后，再按 **|dx|** 排序，**只显示最近的 1 个**
             - **快速预览**：q_i / p_ix 图均只画选出的那一个点；候选在 JSON `instance_qi_all` / `instance_pi_x_all`

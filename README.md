@@ -44,7 +44,7 @@ bash start.sh restart    # 默认 :8000；可用 DEVICE=cpu
    - 每实例：`p_i`（Z 最小）→ 预览 P1 / 实例点
 
 3. **抓取点 q + 预览拆分**（`2c59e71`）  
-   - `p_i` 后取相机系 `|y−p_i.y|≤2mm` 聚合中心 **`q_i`**；按 P1-X `|dx|` **只保留最近 1 个** 作为夹爪抓取点  
+   - `p_i` 后以球心半径 **8mm** 聚合中心 **`q_i`**；按 P1-X `|dx|` **只保留最近 1 个** 作为夹爪抓取点  
    - UI JSON：`[x,y,z,rx,ry,rz]`（xyz=mm，姿态=°）  
    - 实例分割预览拆成 **mask** / **bbox** 两张图（SAM3 Tab 与 SAM-6D ISM 均已支持）
 

@@ -1,6 +1,6 @@
 # 抓取点 REST API：`/api/v1/infer/grasp`
 
-与 Gradio **「抓取 位姿估计」** 页签同逻辑：实例分割 → 标记位 P1 → `q_i`（p_i 的 y±2mm 聚合）→ 沿 P1-X 取最近的抓取点 `q`。
+与 Gradio **「抓取 位姿估计」** 页签同逻辑：实例分割 → 标记位 P1 → `q_i`（以 p_i 为球心半径 8mm 聚合）→ 沿 P1-X 取最近的抓取点 `q`。
 
 算法细节见 [sam3_seg_tab.md](sam3_seg_tab.md)。
 
@@ -34,7 +34,8 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
 | `threshold` | float | 否 | SAM3 threshold |
 | `mask_threshold` | float | 否 | SAM3 mask_threshold |
 | `timeout_s` | float | 否 | SAM3 超时（秒） |
-| `y_band_mm` | float | 否 | 聚合带宽，默认 `2.0` |
+| `radius_mm` | float | 否 | 以 p_i 为球心的聚合半径（mm），默认 `8.0` |
+| `y_band_mm` | float | 否 | 兼容旧参数，等同 `radius_mm` |
 
 `camera.json` 示例：
 
