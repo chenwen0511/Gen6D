@@ -745,16 +745,63 @@ def average_depth_at_uv_corners(
     return float(np.mean(depths)), depths
 
 
+def _split_holes_into_rows(
+    centroids_uv: List[np.ndarray],
+) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """按图像 v 坐标将孔洞分为上下两排（k-means k=2 on v）。"""
+    vs = np.array([float(p[1]) for p in centroids_uv])
+    v_sorted = np.sort(vs)
+    mid = float(np.median(vs))
+    if len(v_sorted) >= 4:
+        gaps = np.diff(v_sorted)
+        split_idx = int(np.argmax(gaps))
+        mid = 0.5 * (v_sorted[split_idx] + v_sorted[split_idx + 1])
+    row_top: List[np.ndarray] = []
+    row_bot: List[np.ndarray] = []
+    for p in centroids_uv:
+        if float(p[1]) <= mid:
+            row_top.append(p)
+        else:
+            row_bot.append(p)
+    return row_top, row_bot
+
+
 def shelf_horizontal_from_hole_centroids(
     centroids_uv: List[np.ndarray],
     depth_m: np.ndarray,
     camera: CameraIntrinsics,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
-    """多个圆形孔洞中心 → 货架水平方向（相机系 3D 单位向量）。"""
+    """
+    多个圆形孔洞中心 → 货架水平方向（相机系 3D 单位向量）。
+
+    面板孔洞分上下两排交错排列，同一排内的孔才处于同一水平。
+    先按 v 分两排，选跨度（最左到最右）更大的一排来定水平。
+    """
     if len(centroids_uv) < 2:
         raise ValueError(f"至少需要 2 个孔洞中心，当前 {len(centroids_uv)}")
 
-    ordered = sorted(centroids_uv, key=lambda p: float(p[0]))
+    row_top, row_bot = _split_holes_into_rows(centroids_uv)
+
+    def _row_span(row: List[np.ndarray]) -> float:
+        if len(row) < 2:
+            return 0.0
+        us = [float(p[0]) for p in row]
+        return max(us) - min(us)
+
+    if _row_span(row_top) >= _row_span(row_bot) and len(row_top) >= 2:
+        chosen = row_top
+        chosen_label = "top"
+    elif len(row_bot) >= 2:
+        chosen = row_bot
+        chosen_label = "bottom"
+    elif len(row_top) >= 2:
+        chosen = row_top
+        chosen_label = "top"
+    else:
+        chosen = centroids_uv
+        chosen_label = "all_fallback"
+
+    ordered = sorted(chosen, key=lambda p: float(p[0]))
     left_uv = np.asarray(ordered[0], dtype=np.float64)
     right_uv = np.asarray(ordered[-1], dtype=np.float64)
     z_left = sample_depth_at(depth_m, float(left_uv[0]), float(left_uv[1]))
@@ -770,6 +817,10 @@ def shelf_horizontal_from_hole_centroids(
         horizontal = -horizontal
     return horizontal, {
         "hole_count": len(centroids_uv),
+        "row_used": chosen_label,
+        "row_top_count": len(row_top),
+        "row_bot_count": len(row_bot),
+        "row_holes_used": len(chosen),
         "centroids_uv": [np.asarray(p, dtype=np.float64).round(2).tolist() for p in ordered],
         "left_uv": left_uv.round(2).tolist(),
         "right_uv": right_uv.round(2).tolist(),

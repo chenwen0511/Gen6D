@@ -203,7 +203,7 @@ def _build_scene_with_optional_p1(
         marker_pts.append(p_pts)
         marker_cols.append(p_cols)
         geometries.append(
-            create_pose_marker_sphere(origin_i, radius_mm=12.0, color_rgba=(*core_rgb, 255))
+            create_pose_marker_sphere(origin_i, radius_mm=4.0, color_rgba=(*core_rgb, 255))
         )
         geometries.append(
             create_pose_axes_mesh(origin_i, rot_i, axis_length_mm=70.0, radius_mm=2.2)
@@ -259,7 +259,7 @@ def _build_scene_with_optional_p1(
         "pi_count": len(qi_list),
         "pi_candidate_count": len(qi_all),
         "pi_note": (
-            "各实例：p_i=剔除外点后 Z 最小 → 球半径 8mm → 相机 y±2mm 聚合中心 q_i；"
+            "各实例：p_i=剔除外点后 Z 最小 → 球半径 8mm → 相机 y±2mm → q_i(xy 均值, z=p_i.z)；"
             "有 P1 时再按 q_i 的 P1-X |dx| 只保留最近 1 个用于显示；"
             "JSON 含 p_i_mm / q_i_mm，候选见 instance_qi_all"
         ),
@@ -651,7 +651,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
         gr.Markdown("### 3D 点云（传感器深度 · 实例分色 · P1 / q_i 坐标轴）")
         gr.Markdown(
             "> **灰色**=背景；**彩色**=各 SAM3 实例；"
-            "每实例先求 **p_i（Z 最小）**，再 **球半径 8mm** 后 **相机 y±2mm** 聚合得 **q_i** 用于展示；"
+            "每实例先求 **p_i（Z 最小）**，再 **球半径 8mm** 后 **相机 y±2mm** 得 **q_i**（xy 均值，z=p_i.z）；"
             "有 P1 时再按 q_i 的 P1-X |dx| **只保留最近 1 个**。"
             "黄球/短轴 = 标记 P1。详情见 JSON `instance_qi`（含 `p_i_mm` / `q_i_mm`）。"
         )
@@ -708,7 +708,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
               2. 蓝色 LED 提示词分割发光圆 → **圆心** 为 P1 像素中心
               3. LED 外接正方形四角 **A–D** 深度均值 → P1 深度；LED 平面法向 + 孔洞水平 → 姿态
             - **抓取点 q**：最终保留的 q_i；左侧 JSON 的 `xyzrxryrz = [x,y,z,rx,ry,rz]`（xyz=mm，姿态=°，ZYX）
-            - **实例 q_i**：先求 **p_i（Z 最小）** → **球 8mm** → **相机 y±2mm** 聚合中心 **q_i**（UI 展示 q_i）
+            - **实例 q_i**：先求 **p_i（Z 最小）** → **球 8mm** → **相机 y±2mm** → **q_i**（筛选点 **xy 均值**，**z 取 p_i.z**）
               → 有 P1 时再按 **P1-X |dx|** **只显示最近的 1 个**
             - **实例 p_ix**：各实例沿 P1-X 最近点后，再按 **|dx|** 排序，**只显示最近的 1 个**
             - **快速预览**：q_i / p_ix 图均只画选出的那一个点；候选在 JSON `instance_qi_all` / `instance_pi_x_all`

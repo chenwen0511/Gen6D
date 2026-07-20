@@ -559,6 +559,14 @@ def find_instance_min_z_points(
     return results
 
 
+def _qi_xy_mean_z_from_pi(filter_pts: np.ndarray, p_i: np.ndarray) -> np.ndarray:
+    """筛选点取 xy 均值，z 固定为 p_i（instance min-Z）。"""
+    if filter_pts.shape[0] == 0:
+        return p_i.copy()
+    xy_mean = filter_pts[:, :2].mean(axis=0)
+    return np.array([xy_mean[0], xy_mean[1], float(p_i[2])], dtype=np.float64)
+
+
 def find_instance_qi_from_pi_sphere(
     depth: np.ndarray,
     instance_id_map: np.ndarray,
@@ -571,8 +579,9 @@ def find_instance_qi_from_pi_sphere(
 ) -> list[dict]:
     """
     各实例：先按原规则取 p_i（剔除外点后 Z 最小），再以 p_i 为球心、
-    半径 radius_mm 内的点，再取相机系 |y - p_i.y| ≤ y_band_mm 的点求均值中心 q_i。
-    若 y 带内无点则回退为球内点均值。``position_mm`` 为 q_i（供 UI 展示）。
+    半径 radius_mm 内的点，再取相机系 |y - p_i.y| ≤ y_band_mm 的点；
+    q_i 的 xy 为筛选点均值，z 取 p_i.z（min-Z）。若 y 带内无点则回退球内 xy 均值。
+    ``position_mm`` 为 q_i（供 UI 展示）。
 
     :return: [{instance_id, position_mm(=q_i), p_i_mm, q_i_mm, radius_mm, y_band_mm,
                num_sphere, num_band, num_raw, num_inlier, z_mm}, ...]
@@ -605,9 +614,9 @@ def find_instance_qi_from_pi_sphere(
             band_pts = sphere_pts[band_mask]
             num_band = int(band_pts.shape[0])
             if num_band == 0:
-                q_i = sphere_pts.mean(axis=0)
+                q_i = _qi_xy_mean_z_from_pi(sphere_pts, p_i)
             else:
-                q_i = band_pts.mean(axis=0)
+                q_i = _qi_xy_mean_z_from_pi(band_pts, p_i)
         results.append(
             {
                 "instance_id": inst_id,
