@@ -96,6 +96,7 @@ class GraspInferResult:
     mask_vis: Optional[Image.Image] = None
     bbox_vis: Optional[Image.Image] = None
     p1_vis: Optional[Image.Image] = None
+    abcd_zoom: Optional[Image.Image] = None
     elapsed_s: float = 0.0
     num_instances: int = 0
     marker_p1: Dict[str, Any] = field(default_factory=dict)
@@ -217,6 +218,7 @@ def infer_grasp(
     # --- 2) 标记位 P1 ---
     marker_payload: Dict[str, Any] = {"enabled": bool(enable_marker_p1)}
     p1_vis: Optional[Image.Image] = None
+    abcd_zoom: Optional[Image.Image] = None
     p1_pose: Optional[Pose6D] = None
     if enable_marker_p1:
         hole_prompt_text = (
@@ -231,7 +233,7 @@ def infer_grasp(
         marker_payload["hole_prompt"] = hole_prompt_text
         marker_payload["led_prompt"] = led_prompt_text
         try:
-            p1_pose, marker_payload, p1_vis = infer_p1_from_shelf_panel(
+            p1_pose, marker_payload, p1_vis, abcd_zoom = infer_p1_from_shelf_panel(
                 image_for_seg,
                 sensor_depth,
                 place_camera,
@@ -298,6 +300,7 @@ def infer_grasp(
             mask_vis=mask_vis,
             bbox_vis=bbox_vis,
             p1_vis=p1_vis,
+            abcd_zoom=abcd_zoom,
             num_instances=instance_count,
             marker_p1=marker_payload,
             instance_qi=[],
@@ -333,6 +336,7 @@ def infer_grasp(
         mask_vis=mask_vis,
         bbox_vis=bbox_vis,
         p1_vis=p1_vis,
+        abcd_zoom=abcd_zoom,
         elapsed_s=round(time.perf_counter() - t0, 3),
         num_instances=instance_count,
         marker_p1=marker_payload,

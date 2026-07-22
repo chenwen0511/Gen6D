@@ -73,6 +73,7 @@ Sam3TabOutputs = Tuple[
     Optional[Image.Image],  # instance mask
     Optional[Image.Image],  # instance bbox
     Optional[Image.Image],  # marker p1 vis
+    Optional[Image.Image],  # ABCD zoom vis
     Optional[Image.Image],  # p1 + q_i preview
     Optional[Image.Image],  # p1 + p_ix preview
     Optional[str],  # glb preview
@@ -117,7 +118,20 @@ def _empty_grasp_json(message: str = "尚未计算出抓取点 q") -> str:
 
 def _error_outputs(message: str, *, sensor_vis: Optional[Image.Image] = None) -> Sam3TabOutputs:
     err = json.dumps({"success": False, "message": message}, ensure_ascii=False, indent=2)
-    return sensor_vis, None, None, None, None, None, None, None, None, _empty_grasp_json(message), err
+    return (
+        sensor_vis,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        _empty_grasp_json(message),
+        err,
+    )
 
 
 def _detection_summary(detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -354,6 +368,7 @@ def run_sam3_seg_tab_inference(
             None,
             None,
             None,
+            None,
             _empty_grasp_json(str(exc)),
             json.dumps(err, ensure_ascii=False, indent=2),
         )
@@ -385,6 +400,7 @@ def run_sam3_seg_tab_inference(
     # --- 2) 货架孔洞 + 蓝色 LED → P1（可选，两次 SAM3）---
     marker_payload: Dict[str, Any] = {"enabled": bool(enable_marker_p1)}
     p1_vis: Optional[Image.Image] = None
+    abcd_zoom: Optional[Image.Image] = None
     p1_pose = None
     if enable_marker_p1:
         hole_prompt_text = (hole_prompt or load_hole_prompt() or DEFAULT_PLACE_HOLE_PROMPT).strip()
@@ -392,7 +408,7 @@ def run_sam3_seg_tab_inference(
         marker_payload["hole_prompt"] = hole_prompt_text
         marker_payload["led_prompt"] = led_prompt_text
         try:
-            p1_pose, marker_payload, p1_vis = infer_p1_from_shelf_panel(
+            p1_pose, marker_payload, p1_vis, abcd_zoom = infer_p1_from_shelf_panel(
                 image_for_seg,
                 sensor_depth,
                 place_camera,
@@ -545,6 +561,7 @@ def run_sam3_seg_tab_inference(
         mask_vis,
         bbox_vis,
         p1_vis,
+        abcd_zoom,
         pi_preview,
         pix_preview,
         glb_path,
@@ -637,6 +654,11 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                     label="P1（孔洞水平 + 蓝色 LED + 外接正方形 ABCD）",
                     height=220,
                 )
+                out_abcd = gr.Image(
+                    type="pil",
+                    label="ABCD 外接正方形放大（角点 / 深度）",
+                    height=280,
+                )
                 out_pi = gr.Image(
                     type="pil",
                     label="P1 + 最近 q_i（球 8mm + y±2mm；按 P1-X 仅 1 个）",
@@ -688,6 +710,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                 out_seg_mask,
                 out_seg_bbox,
                 out_p1,
+                out_abcd,
                 out_pi,
                 out_pix,
                 out_glb,
@@ -707,6 +730,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
               1. 孔洞提示词分割所有圆形通孔 → 左右孔洞中心连线定 **水平 X**
               2. 蓝色 LED 提示词分割发光圆 → **圆心** 为 P1 像素中心
               3. LED 外接正方形四角 **A–D** 深度均值 → P1 深度；LED 平面法向 + 孔洞水平 → 姿态
+              4. **ABCD 放大图**：单独裁剪 LED 外接正方形区域，标注角点与各角深度
             - **抓取点 q**：最终保留的 q_i；左侧 JSON 的 `xyzrxryrz = [x,y,z,rx,ry,rz]`（xyz=mm，姿态=°，ZYX）
             - **实例 q_i**：先求 **p_i（Z 最小）** → **球 8mm** → **相机 y±2mm** → **q_i**（筛选点 **xy 均值**，**z 取 p_i.z**）
               → 有 P1 时再按 **P1-X |dx|** **只显示最近的 1 个**

@@ -78,7 +78,8 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
     "grasp_vis": "<base64 PNG>",
     "mask_vis": "<base64 PNG>",
     "bbox_vis": "<base64 PNG>",
-    "p1_vis": "<base64 PNG>"
+    "p1_vis": "<base64 PNG>",
+    "abcd_zoom": "<base64 PNG>"
   }
 }
 ```
@@ -89,6 +90,7 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
 | `images.grasp_vis` | P1 + 最终 q 的叠加图（与 UI 页签预览一致） |
 | `images.mask_vis` / `bbox_vis` | 实例分割对照图（可选使用） |
 | `images.p1_vis` | 标记位几何可视化（若开启） |
+| `images.abcd_zoom` | LED 外接正方形 ABCD 局部放大图（角点 / 深度） |
 
 ---
 

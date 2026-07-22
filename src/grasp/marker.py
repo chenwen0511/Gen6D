@@ -299,6 +299,120 @@ def render_shelf_p1_visualization(
     return Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
 
 
+def render_abcd_zoom_visualization(
+    rgb: Image.Image,
+    pose_meta: Optional[Dict[str, Any]] = None,
+    *,
+    out_size: int = 480,
+    pad_px: int = 24,
+) -> Optional[Image.Image]:
+    """外接正方形 ABCD 局部放大图：角点、边、中心与深度标注。"""
+    meta = pose_meta or {}
+    corners_uv = meta.get("corners_uv") or {}
+    pts: List[Tuple[str, Tuple[float, float]]] = []
+    for key in ("A", "B", "C", "D"):
+        uv = corners_uv.get(key)
+        if not uv or len(uv) < 2:
+            continue
+        pts.append((key, (float(uv[0]), float(uv[1]))))
+    if len(pts) < 2:
+        return None
+
+    arr = np.array(rgb.convert("RGB"))
+    h, w = arr.shape[:2]
+    xs = [p[1][0] for p in pts]
+    ys = [p[1][1] for p in pts]
+    center = meta.get("center_uv")
+    if center and len(center) >= 2:
+        xs.append(float(center[0]))
+        ys.append(float(center[1]))
+
+    x0 = int(np.floor(min(xs))) - pad_px
+    y0 = int(np.floor(min(ys))) - pad_px
+    x1 = int(np.ceil(max(xs))) + pad_px
+    y1 = int(np.ceil(max(ys))) + pad_px
+    # 保证裁剪区域至少有一定边长，便于放大后看清
+    side = max(x1 - x0, y1 - y0, 48)
+    cx = 0.5 * (x0 + x1)
+    cy = 0.5 * (y0 + y1)
+    x0 = int(round(cx - 0.5 * side))
+    y0 = int(round(cy - 0.5 * side))
+    x1 = x0 + side
+    y1 = y0 + side
+    x0 = max(0, x0)
+    y0 = max(0, y0)
+    x1 = min(w, x1)
+    y1 = min(h, y1)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+
+    crop = arr[y0:y1, x0:x1].copy()
+    scale = float(out_size) / float(max(x1 - x0, y1 - y0))
+    zoom_w = max(1, int(round((x1 - x0) * scale)))
+    zoom_h = max(1, int(round((y1 - y0) * scale)))
+    zoom = cv2.resize(crop, (zoom_w, zoom_h), interpolation=cv2.INTER_NEAREST)
+    bgr = cv2.cvtColor(zoom, cv2.COLOR_RGB2BGR)
+
+    def _to_zoom(u: float, v: float) -> Tuple[int, int]:
+        return int(round((u - x0) * scale)), int(round((v - y0) * scale))
+
+    corner_depths = meta.get("corner_depths_m") or []
+    depth_by_label = {}
+    if isinstance(corner_depths, list) and len(corner_depths) >= 4:
+        for label, z in zip(("A", "B", "C", "D"), corner_depths):
+            try:
+                depth_by_label[label] = float(z) * 1000.0
+            except (TypeError, ValueError):
+                continue
+
+    zoom_pts: List[Tuple[int, int]] = []
+    for label, (u, v) in pts:
+        pt = _to_zoom(u, v)
+        zoom_pts.append(pt)
+        cv2.circle(bgr, pt, 10, (255, 0, 255), 3, cv2.LINE_AA)
+        cv2.circle(bgr, pt, 3, (255, 255, 255), -1, cv2.LINE_AA)
+        text = label
+        if label in depth_by_label:
+            text = f"{label} {depth_by_label[label]:.1f}mm"
+        cv2.putText(
+            bgr,
+            text,
+            (pt[0] + 12, pt[1] - 12),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 0, 255),
+            2,
+            cv2.LINE_AA,
+        )
+    if len(zoom_pts) == 4:
+        cv2.polylines(bgr, [np.array(zoom_pts, dtype=np.int32)], True, (255, 0, 255), 2, cv2.LINE_AA)
+
+    if center and len(center) >= 2:
+        cpt = _to_zoom(float(center[0]), float(center[1]))
+        cv2.drawMarker(bgr, cpt, (0, 220, 255), markerType=cv2.MARKER_CROSS, markerSize=24, thickness=2)
+        cv2.putText(
+            bgr,
+            "P1",
+            (cpt[0] + 10, cpt[1] + 22),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 220, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    depth_center = meta.get("depth_center_m")
+    legend = ["ABCD zoom (LED circumscribed square)"]
+    if depth_center is not None:
+        try:
+            legend.append(f"P1 depth mean ABCD: {float(depth_center) * 1000.0:.1f} mm")
+        except (TypeError, ValueError):
+            pass
+    legend.append(f"crop=[{x0},{y0}]-[{x1},{y1}]  scale={scale:.1f}x")
+    _draw_legend(bgr, legend)
+    return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+
+
 def render_marker_p1_visualization(
     rgb: Image.Image,
     *,
@@ -419,8 +533,8 @@ def estimate_p1_from_shelf_markers(
     hole_masks: List[np.ndarray],
     depth_mm: np.ndarray,
     camera: CameraIntrinsics,
-) -> Tuple[Pose6D, Dict[str, Any], Image.Image]:
-    """面板孔洞 + 蓝色 LED → P1 位姿 + 可视化。
+) -> Tuple[Pose6D, Dict[str, Any], Image.Image, Optional[Image.Image]]:
+    """面板孔洞 + 蓝色 LED → P1 位姿 + 全图可视化 + ABCD 放大图。
 
     规则：
     1. 所有货架面板圆孔用于确定货架水平方向；
@@ -437,7 +551,8 @@ def estimate_p1_from_shelf_markers(
         camera=camera,
         pose_meta=meta,
     )
-    return p1, meta, vis
+    abcd_zoom = render_abcd_zoom_visualization(rgb, meta)
+    return p1, meta, vis, abcd_zoom
 
 
 def estimate_p1_from_marker(
@@ -447,7 +562,7 @@ def estimate_p1_from_marker(
     camera: CameraIntrinsics,
     *,
     hole_masks: Optional[List[np.ndarray]] = None,
-) -> Tuple[Pose6D, Dict[str, Any], Image.Image]:
+) -> Tuple[Pose6D, Dict[str, Any], Image.Image, Optional[Image.Image]]:
     """兼容旧接口：marker_mask 视为 LED mask。"""
     return estimate_p1_from_shelf_markers(
         rgb, marker_mask, hole_masks or [], depth_mm, camera
@@ -466,10 +581,10 @@ def infer_p1_from_shelf_panel(
     threshold: float = DEFAULT_PLACE_SAM3_THRESHOLD,
     mask_threshold: float = DEFAULT_PLACE_SAM3_MASK_THRESHOLD,
     timeout_s: float = 300.0,
-) -> Tuple[Optional[Pose6D], Dict[str, Any], Optional[Image.Image]]:
+) -> Tuple[Optional[Pose6D], Dict[str, Any], Optional[Image.Image], Optional[Image.Image]]:
     """
     两次 SAM3：面板孔洞定水平 + 蓝色 LED 定 P1。
-    返回 (p1_pose|None, marker_payload, p1_vis|None)。
+    返回 (p1_pose|None, marker_payload, p1_vis|None, abcd_zoom|None)。
     """
     payload: Dict[str, Any] = {
         "hole_prompt": hole_prompt,
@@ -519,7 +634,7 @@ def infer_p1_from_shelf_panel(
     if not led_result.detections:
         payload["success"] = False
         payload["message"] = "SAM3 未检测到蓝色 LED 标记"
-        return None, payload, None
+        return None, payload, None, None
 
     led_det, led_selection = select_blue_led_detection(
         list(led_result.detections), image_size, rgb
@@ -528,14 +643,14 @@ def infer_p1_from_shelf_panel(
     if led_det is None:
         payload["success"] = False
         payload["message"] = "未能选出蓝色 LED 标记"
-        return None, payload, None
+        return None, payload, None, None
 
     led_mask = _decode_detection_mask(led_det, image_size)
-    p1, p1_meta, vis = estimate_p1_from_shelf_markers(
+    p1, p1_meta, vis, abcd_zoom = estimate_p1_from_shelf_markers(
         rgb, led_mask, hole_masks, depth_mm, camera
     )
     payload["success"] = True
     payload["p1"] = p1.to_dict()
     payload["p1_meta"] = p1_meta
     payload["num_holes"] = len(hole_masks)
-    return p1, payload, vis
+    return p1, payload, vis, abcd_zoom

@@ -214,6 +214,7 @@ def create_app(model_dir: str, device: str) -> FastAPI:
             "mask_vis": _pil_to_b64_png(result.mask_vis),
             "bbox_vis": _pil_to_b64_png(result.bbox_vis),
             "p1_vis": _pil_to_b64_png(result.p1_vis),
+            "abcd_zoom": _pil_to_b64_png(result.abcd_zoom),
         }
         status = 200 if result.success else 422
         return JSONResponse(body, status_code=status)
