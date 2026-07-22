@@ -309,16 +309,23 @@ def create_pose_axes_mesh(
     origin: np.ndarray,
     rotation_glb: np.ndarray,
     *,
-    axis_length_mm: float = 80.0,
+    axis_length_mm: float | Sequence[float] = 80.0,
     radius_mm: float = 2.0,
 ) -> trimesh.Trimesh:
     parts: list[trimesh.Trimesh] = []
     origin = np.asarray(origin, dtype=np.float64)
+    if isinstance(axis_length_mm, (int, float)):
+        lengths = [float(axis_length_mm)] * 3
+    else:
+        lengths = [float(v) for v in axis_length_mm]
+        if len(lengths) != 3:
+            raise ValueError("axis_length_mm 需为标量或长度 3 的序列 [X,Y,Z]")
     for axis_idx, color in enumerate(_POSE_AXIS_COLORS):
+        length = lengths[axis_idx]
         direction = rotation_glb[:, axis_idx]
-        cyl = trimesh.creation.cylinder(radius=radius_mm, height=axis_length_mm, sections=10)
+        cyl = trimesh.creation.cylinder(radius=radius_mm, height=length, sections=10)
         cyl.apply_transform(_align_z_to_direction(direction))
-        cyl.apply_translation(origin + direction * (axis_length_mm / 2.0))
+        cyl.apply_translation(origin + direction * (length / 2.0))
         cyl.visual.face_colors = np.tile(np.array(color, dtype=np.uint8), (len(cyl.faces), 1))
         parts.append(cyl)
 
@@ -353,7 +360,7 @@ def inject_axis_points(
     origin_glb: np.ndarray,
     rotation_glb: np.ndarray,
     *,
-    axis_length_mm: float = 50.0,
+    axis_length_mm: float | Sequence[float] = 50.0,
     samples_per_axis: int = 24,
     core_color: Sequence[int] = (255, 0, 255),
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -363,6 +370,12 @@ def inject_axis_points(
     """
     origin_glb = np.asarray(origin_glb, dtype=np.float64)
     rotation_glb = np.asarray(rotation_glb, dtype=np.float64)
+    if isinstance(axis_length_mm, (int, float)):
+        lengths = [float(axis_length_mm)] * 3
+    else:
+        lengths = [float(v) for v in axis_length_mm]
+        if len(lengths) != 3:
+            raise ValueError("axis_length_mm 需为标量或长度 3 的序列 [X,Y,Z]")
     axis_colors = (
         np.array([255, 64, 64], dtype=np.uint8),
         np.array([64, 220, 64], dtype=np.uint8),
@@ -377,7 +390,9 @@ def inject_axis_points(
     cols.append(np.tile(np.asarray(core_color, dtype=np.uint8), (core.shape[0], 1)))
     for axis_idx, color in enumerate(axis_colors):
         direction = rotation_glb[:, axis_idx]
-        for t in np.linspace(0.0, axis_length_mm, samples_per_axis):
+        length = lengths[axis_idx]
+        n_samples = max(samples_per_axis, int(round(samples_per_axis * length / max(lengths))))
+        for t in np.linspace(0.0, length, n_samples):
             pts.append(origin_glb + direction * float(t))
             cols.append(color)
     return np.vstack(pts).astype(np.float32), np.vstack(cols).astype(np.uint8)

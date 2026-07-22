@@ -254,6 +254,21 @@ def render_shelf_p1_visualization(
     if len(corner_pts) == 4:
         cv2.polylines(overlay, [np.array(corner_pts, dtype=np.int32)], True, (255, 0, 255), 2, cv2.LINE_AA)
 
+    corners_rot = (pose_meta or {}).get("corners_rot45_uv") or {}
+    rot_pts: List[Tuple[int, int]] = []
+    for key, label in zip(("a", "b", "c", "d"), ("a", "b", "c", "d")):
+        uv = corners_rot.get(key)
+        if not uv:
+            continue
+        pt = (int(round(uv[0])), int(round(uv[1])))
+        rot_pts.append(pt)
+        cv2.circle(overlay, pt, 5, (0, 165, 255), 2, cv2.LINE_AA)
+        cv2.putText(
+            overlay, label, (pt[0] + 6, pt[1] + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2, cv2.LINE_AA
+        )
+    if len(rot_pts) == 4:
+        cv2.polylines(overlay, [np.array(rot_pts, dtype=np.int32)], True, (0, 165, 255), 2, cv2.LINE_AA)
+
     hole_line = (pose_meta or {}).get("hole_line") or {}
     left_uv = hole_line.get("left_uv")
     right_uv = hole_line.get("right_uv")
@@ -291,9 +306,11 @@ def render_shelf_p1_visualization(
         [
             "shelf P1 (blue LED + holes)",
             f"P1 position_mm: {pos_mm}",
-            f"depth: mean ABCD corners",
+            f"depth: LED ABCD+abcd; Z=all holes 8pt",
             f"holes: {hole_count}, rotation: {rot_method}",
-            "X=hole horizontal, Z=LED plane, Y=Z×X",
+            "frame=camera (X right,Y down,Z fwd)",
+            "3D preview=glb_y_up (Y flipped)",
+            "X=hole horizontal, Z=joint hole planes, Y=Z×X",
         ],
     )
     return Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
@@ -306,22 +323,29 @@ def render_abcd_zoom_visualization(
     out_size: int = 480,
     pad_px: int = 24,
 ) -> Optional[Image.Image]:
-    """外接正方形 ABCD 局部放大图：角点、边、中心与深度标注。"""
+    """外接正方形 ABCD + 旋转 45° 的 abcd 局部放大图。"""
     meta = pose_meta or {}
     corners_uv = meta.get("corners_uv") or {}
+    corners_rot = meta.get("corners_rot45_uv") or {}
     pts: List[Tuple[str, Tuple[float, float]]] = []
     for key in ("A", "B", "C", "D"):
         uv = corners_uv.get(key)
         if not uv or len(uv) < 2:
             continue
         pts.append((key, (float(uv[0]), float(uv[1]))))
+    rot_pts_src: List[Tuple[str, Tuple[float, float]]] = []
+    for key in ("a", "b", "c", "d"):
+        uv = corners_rot.get(key)
+        if not uv or len(uv) < 2:
+            continue
+        rot_pts_src.append((key, (float(uv[0]), float(uv[1]))))
     if len(pts) < 2:
         return None
 
     arr = np.array(rgb.convert("RGB"))
     h, w = arr.shape[:2]
-    xs = [p[1][0] for p in pts]
-    ys = [p[1][1] for p in pts]
+    xs = [p[1][0] for p in pts] + [p[1][0] for p in rot_pts_src]
+    ys = [p[1][1] for p in pts] + [p[1][1] for p in rot_pts_src]
     center = meta.get("center_uv")
     if center and len(center) >= 2:
         xs.append(float(center[0]))
@@ -357,9 +381,16 @@ def render_abcd_zoom_visualization(
         return int(round((u - x0) * scale)), int(round((v - y0) * scale))
 
     corner_depths = meta.get("corner_depths_m") or []
-    depth_by_label = {}
+    depth_by_label: Dict[str, float] = {}
     if isinstance(corner_depths, list) and len(corner_depths) >= 4:
         for label, z in zip(("A", "B", "C", "D"), corner_depths):
+            try:
+                depth_by_label[label] = float(z) * 1000.0
+            except (TypeError, ValueError):
+                continue
+    rot_depths = meta.get("corner_rot45_depths_m") or []
+    if isinstance(rot_depths, list) and len(rot_depths) >= 4:
+        for label, z in zip(("a", "b", "c", "d"), rot_depths):
             try:
                 depth_by_label[label] = float(z) * 1000.0
             except (TypeError, ValueError):
@@ -387,6 +418,28 @@ def render_abcd_zoom_visualization(
     if len(zoom_pts) == 4:
         cv2.polylines(bgr, [np.array(zoom_pts, dtype=np.int32)], True, (255, 0, 255), 2, cv2.LINE_AA)
 
+    zoom_rot_pts: List[Tuple[int, int]] = []
+    for label, (u, v) in rot_pts_src:
+        pt = _to_zoom(u, v)
+        zoom_rot_pts.append(pt)
+        cv2.circle(bgr, pt, 10, (0, 165, 255), 3, cv2.LINE_AA)
+        cv2.circle(bgr, pt, 3, (255, 255, 255), -1, cv2.LINE_AA)
+        text = label
+        if label in depth_by_label:
+            text = f"{label} {depth_by_label[label]:.1f}mm"
+        cv2.putText(
+            bgr,
+            text,
+            (pt[0] + 12, pt[1] + 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 165, 255),
+            2,
+            cv2.LINE_AA,
+        )
+    if len(zoom_rot_pts) == 4:
+        cv2.polylines(bgr, [np.array(zoom_rot_pts, dtype=np.int32)], True, (0, 165, 255), 2, cv2.LINE_AA)
+
     if center and len(center) >= 2:
         cpt = _to_zoom(float(center[0]), float(center[1]))
         cv2.drawMarker(bgr, cpt, (0, 220, 255), markerType=cv2.MARKER_CROSS, markerSize=24, thickness=2)
@@ -402,10 +455,10 @@ def render_abcd_zoom_visualization(
         )
 
     depth_center = meta.get("depth_center_m")
-    legend = ["ABCD zoom (LED circumscribed square)"]
+    legend = ["ABCD+abcd zoom (rot45, 8 corners)"]
     if depth_center is not None:
         try:
-            legend.append(f"P1 depth mean ABCD: {float(depth_center) * 1000.0:.1f} mm")
+            legend.append(f"P1 depth mean 8pts: {float(depth_center) * 1000.0:.1f} mm")
         except (TypeError, ValueError):
             pass
     legend.append(f"crop=[{x0},{y0}]-[{x1},{y1}]  scale={scale:.1f}x")

@@ -28,7 +28,7 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
 | `camera` | file | 条件 | `camera.json` 文件（与 `camera_json` 二选一） |
 | `camera_json` | string | 条件 | 内参 JSON 字符串（与 `camera` 二选一） |
 | `prompt` | string | 否 | 实例 SAM3 提示词（默认读配置） |
-| `hole_prompt` | string | 否 | 货架面板圆形孔洞 SAM3 提示词（定水平方向） |
+| `hole_prompt` | string | 否 | 货架面板圆形孔洞 SAM3 提示词（定水平 X + 联合定面板法向 Z） |
 | `led_prompt` | string | 否 | 蓝色 LED 圆形标记 SAM3 提示词（定 P1 像素中心） |
 | `marker_prompt` | string | 否 | 兼容旧字段，等同 `led_prompt` |
 | `enable_marker_p1` | bool | 否 | 是否识别孔洞 + LED 并计算 P1，默认 `true` |
@@ -60,18 +60,23 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
   "message": "ok",
   "elapsed_s": 3.21,
   "xyzrxryrz": [12.3, -40.5, 395.0, 1.2, -0.5, 89.7],
+  "frame": "camera",
+  "preview_frame": "glb_y_up",
+  "axis_hint": "X right, Y down, Z forward (mm)",
   "unit": { "xyz": "mm", "rx_ry_rz": "deg" },
   "grasp_pose": {
     "success": true,
     "xyzrxryrz": [12.3, -40.5, 395.0, 1.2, -0.5, 89.7],
+    "frame": "camera",
+    "preview_frame": "glb_y_up",
     "position_mm": [12.3, -40.5, 395.0],
     "rpy_deg": { "rx": 1.2, "ry": -0.5, "rz": 89.7 },
     "rotation_matrix": [[...], [...], [...]],
     "meta": { "instance_id": 3, "x_dist_mm": 0.25, "role": "gripper_grasp_point" }
   },
   "num_instances": 4,
-  "marker_p1": { "enabled": true, "success": true, "p1": { ... } },
-  "instance_qi": [ { "instance_id": 3, "q_i_mm": [...], "p_i_mm": [...], "x_dist_mm": 0.25 } ],
+  "marker_p1": { "enabled": true, "success": true, "p1": { "frame": "camera", "preview_frame": "glb_y_up", ... } },
+  "instance_qi": [ { "instance_id": 3, "q_i_mm": [...], "p_i_mm": [...], "glb_position_mm": [...], "frame": "camera", "preview_frame": "glb_y_up", "x_dist_mm": 0.25 } ],
   "instance_qi_all": [ ... ],
   "image_size": [378, 504],
   "images": {
@@ -86,11 +91,13 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
 
 | 字段 | 说明 |
 |------|------|
-| `xyzrxryrz` | **抓取点**：`[x,y,z,rx,ry,rz]`，xyz=**mm**，角度=**°** |
+| `xyzrxryrz` | **抓取点**：`[x,y,z,rx,ry,rz]`，xyz=**mm**，角度=**°**；**相机系** |
+| `frame` | 数值坐标系：`camera`（X 右、Y 下、Z 前） |
+| `preview_frame` | 3D 预览系：`glb_y_up`（相对相机系 Y 翻转）；`glb_position_mm` 在此系 |
 | `images.grasp_vis` | P1 + 最终 q 的叠加图（与 UI 页签预览一致） |
 | `images.mask_vis` / `bbox_vis` | 实例分割对照图（可选使用） |
 | `images.p1_vis` | 标记位几何可视化（若开启） |
-| `images.abcd_zoom` | LED 外接正方形 ABCD 局部放大图（角点 / 深度） |
+| `images.abcd_zoom` | LED 外接正方形 ABCD + 旋转 45° abcd 局部放大图（8 角点 / 深度） |
 
 ---
 

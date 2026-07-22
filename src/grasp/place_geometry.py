@@ -18,6 +18,14 @@ CAMERA_AXIS_Y = np.array([0.0, 1.0, 0.0], dtype=np.float64)
 CAMERA_AXIS_Z = np.array([0.0, 0.0, 1.0], dtype=np.float64)
 CAMERA_UP = np.array([0.0, -1.0, 0.0], dtype=np.float64)  # 图像向上 = -Y
 
+# 位姿/点云数值默认在相机系；3D 预览再转到 GLB（Y 向上）
+FRAME_CAMERA = "camera"
+PREVIEW_FRAME_GLB_Y_UP = "glb_y_up"
+FRAME_AXIS_HINT = {
+    FRAME_CAMERA: "X right, Y down, Z forward (mm)",
+    PREVIEW_FRAME_GLB_Y_UP: "X right, Y up, Z forward (mm); from camera by Y flip",
+}
+
 
 @dataclass
 class CameraIntrinsics:
@@ -48,6 +56,9 @@ class Pose6D:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "frame": FRAME_CAMERA,
+            "preview_frame": PREVIEW_FRAME_GLB_Y_UP,
+            "axis_hint": FRAME_AXIS_HINT[FRAME_CAMERA],
             "position_m": self.position_m.round(6).tolist(),
             "position_mm": self.position_mm.round(3).tolist(),
             "rotation_matrix": self.rotation.round(6).tolist(),
@@ -731,18 +742,182 @@ def detect_circumscribed_square_corners_uv(
     return _order_square_corners_uv(corners), center_uv
 
 
+def rotate_square_corners_uv_45(
+    corners_uv: np.ndarray,
+    center_uv: np.ndarray,
+) -> np.ndarray:
+    """
+    将正方形四角绕圆心旋转 45°，得到另一组外切正方形角点。
+
+    返回顺序固定为 a(上), b(右), c(下), d(左)，便于可视化。
+    """
+    corners = np.asarray(corners_uv, dtype=np.float64).reshape(4, 2)
+    center = np.asarray(center_uv, dtype=np.float64).reshape(2)
+    # 轴对齐外切正方形角点到圆心距离 = r√2；旋转 45° 后角点落在轴上
+    radii = np.linalg.norm(corners - center, axis=1)
+    r_corner = float(np.median(radii))
+    cx, cy = float(center[0]), float(center[1])
+    return np.array(
+        [
+            [cx, cy - r_corner],  # a 上
+            [cx + r_corner, cy],  # b 右
+            [cx, cy + r_corner],  # c 下
+            [cx - r_corner, cy],  # d 左
+        ],
+        dtype=np.float64,
+    )
+
+
 def average_depth_at_uv_corners(
     depth_m: np.ndarray,
     corners_uv: np.ndarray,
     *,
     mask: Optional[np.ndarray] = None,
 ) -> Tuple[float, List[float]]:
-    """外接正方形四角 A–D 深度均值（P1 深度）。"""
+    """外接正方形角点深度均值（P1 深度）。"""
     depths: List[float] = []
     for uv in corners_uv:
         z = sample_depth_at(depth_m, float(uv[0]), float(uv[1]), mask=mask)
         depths.append(z)
     return float(np.mean(depths)), depths
+
+
+def eight_corner_uvs_from_mask(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    圆形 mask → ABCD + 旋转 45° abcd 共 8 个 UV 角点，及圆心。
+
+    :return: (corners_abcd (4,2), corners_rot45 (4,2), center_uv (2,))
+    """
+    corners_uv, center_uv = detect_circumscribed_square_corners_uv(mask)
+    corners_rot = rotate_square_corners_uv_45(corners_uv, center_uv)
+    return corners_uv, corners_rot, np.asarray(center_uv, dtype=np.float64)
+
+
+def eight_corner_points_3d_from_mask(
+    mask: np.ndarray,
+    depth_m: np.ndarray,
+    camera: CameraIntrinsics,
+    *,
+    depth_mask: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """
+    对单个圆形 mask（LED / 孔洞）用 ABCD+abcd 共 8 点反投影到 3D。
+
+    孔洞角点多落在金属面板上，默认不限制 depth_mask，避免通孔内部深度污染。
+    """
+    corners_uv, corners_rot, center_uv = eight_corner_uvs_from_mask(mask)
+    all_uv = np.vstack([corners_uv, corners_rot])
+    points: List[np.ndarray] = []
+    depths: List[float] = []
+    valid_uvs: List[List[float]] = []
+    for uv in all_uv:
+        try:
+            z = sample_depth_at(
+                depth_m, float(uv[0]), float(uv[1]), mask=depth_mask
+            )
+        except ValueError:
+            continue
+        if not np.isfinite(z) or z <= 0:
+            continue
+        points.append(backproject(float(uv[0]), float(uv[1]), z, camera))
+        depths.append(float(z))
+        valid_uvs.append([round(float(uv[0]), 2), round(float(uv[1]), 2)])
+
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3) if points else np.zeros((0, 3), dtype=np.float64)
+    local_normal: Optional[List[float]] = None
+    if pts.shape[0] >= 3:
+        _, n = fit_plane(pts)
+        local_normal = n.round(6).tolist()
+
+    meta: Dict[str, Any] = {
+        "center_uv": center_uv.round(2).tolist(),
+        "corners_uv": {
+            "A": corners_uv[0].round(2).tolist(),
+            "B": corners_uv[1].round(2).tolist(),
+            "C": corners_uv[2].round(2).tolist(),
+            "D": corners_uv[3].round(2).tolist(),
+        },
+        "corners_rot45_uv": {
+            "a": corners_rot[0].round(2).tolist(),
+            "b": corners_rot[1].round(2).tolist(),
+            "c": corners_rot[2].round(2).tolist(),
+            "d": corners_rot[3].round(2).tolist(),
+        },
+        "num_valid_corners": int(pts.shape[0]),
+        "corner_depths_m": [round(z, 6) for z in depths],
+        "valid_uvs": valid_uvs,
+        "local_plane_normal": local_normal,
+    }
+    return pts, meta
+
+
+def plane_normal_from_all_hole_eight_corners(
+    hole_masks: List[np.ndarray],
+    depth_m: np.ndarray,
+    camera: CameraIntrinsics,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """
+    每个孔洞用与 LED 相同的 8 角点方式采 3D 点，再联合拟合面板法向。
+
+    单孔 8 点基线短、噪声大；多孔角点共同拟合可稳定面板朝向。
+    """
+    per_hole: List[Dict[str, Any]] = []
+    all_pts: List[np.ndarray] = []
+    for idx, hole_mask in enumerate(hole_masks, start=1):
+        if hole_mask is None or not np.any(hole_mask):
+            continue
+        pts, hole_meta = eight_corner_points_3d_from_mask(
+            hole_mask, depth_m, camera, depth_mask=None
+        )
+        entry = {"id": idx, **hole_meta}
+        if pts.shape[0] > 0:
+            all_pts.append(pts)
+        per_hole.append(entry)
+
+    if not all_pts:
+        raise ValueError("所有孔洞均无有效 8 角点深度，无法拟合面板法向")
+
+    stacked = np.vstack(all_pts)
+    inliers, _ = _reject_depth_outliers(stacked, mad_ratio=2.5, min_keep=6)
+    if inliers.shape[0] < 3:
+        inliers = stacked
+    if inliers.shape[0] < 3:
+        raise ValueError(f"孔洞 8 角点有效 3D 点不足（{inliers.shape[0]}）")
+
+    centroid, normal = fit_plane(inliers)
+
+    # 与各孔局部法向一致性（符号对齐后平均），写入诊断
+    local_ns: List[np.ndarray] = []
+    for h in per_hole:
+        ln = h.get("local_plane_normal")
+        if not ln:
+            continue
+        n = np.asarray(ln, dtype=np.float64)
+        if float(np.dot(n, normal)) < 0:
+            n = -n
+        local_ns.append(n)
+    mean_local: Optional[List[float]] = None
+    mean_dot: Optional[float] = None
+    if local_ns:
+        mean_n = np.mean(np.stack(local_ns, axis=0), axis=0)
+        mean_n = mean_n / (np.linalg.norm(mean_n) + 1e-12)
+        if mean_n[2] < 0:
+            mean_n = -mean_n
+        mean_local = mean_n.round(6).tolist()
+        mean_dot = round(float(np.dot(mean_n, normal)), 4)
+
+    meta: Dict[str, Any] = {
+        "method": "all_holes_square8_joint_plane",
+        "holes_used": len(per_hole),
+        "num_corner_points": int(stacked.shape[0]),
+        "num_inliers": int(inliers.shape[0]),
+        "plane_centroid_m": centroid.round(6).tolist(),
+        "plane_normal": normal.round(6).tolist(),
+        "mean_local_normal": mean_local,
+        "mean_local_dot_joint": mean_dot,
+        "per_hole": per_hole,
+    }
+    return normal, meta
 
 
 def _split_holes_into_rows(
@@ -766,16 +941,45 @@ def _split_holes_into_rows(
     return row_top, row_bot
 
 
+def _reject_depth_outliers(
+    points_3d: np.ndarray,
+    *,
+    mad_ratio: float = 2.5,
+    min_keep: int = 4,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """按深度 Z 的 MAD 剔除离群点，返回 (inliers, keep_mask)。"""
+    pts = np.asarray(points_3d, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[0] == 0:
+        return pts, np.zeros((0,), dtype=bool)
+    z = pts[:, 2]
+    med = float(np.median(z))
+    mad = float(np.median(np.abs(z - med)))
+    if mad < 1e-6:
+        # 深度几乎一致，全部保留
+        return pts, np.ones((pts.shape[0],), dtype=bool)
+    keep = np.abs(z - med) <= (mad_ratio * 1.4826 * mad)
+    if int(keep.sum()) < min_keep:
+        # 过严时回退：按 |z-median| 保留最近的 min_keep 个
+        order = np.argsort(np.abs(z - med))
+        keep = np.zeros_like(keep)
+        keep[order[: min(min_keep, pts.shape[0])]] = True
+    return pts[keep], keep
+
+
 def shelf_horizontal_from_hole_centroids(
     centroids_uv: List[np.ndarray],
     depth_m: np.ndarray,
     camera: CameraIntrinsics,
+    *,
+    num_samples: int = 20,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
     多个圆形孔洞中心 → 货架水平方向（相机系 3D 单位向量）。
 
-    面板孔洞分上下两排交错排列，同一排内的孔才处于同一水平。
-    先按 v 分两排，选跨度（最左到最右）更大的一排来定水平。
+    1. 按 v 分上下两排，选跨度更大的一排
+    2. 在最左→最右连线上均匀取 num_samples 个像素点
+    3. 反投影到 3D，按深度 MAD 剔除外点
+    4. 对剩余点做 PCA/SVD，主方向即为红轴（水平）
     """
     if len(centroids_uv) < 2:
         raise ValueError(f"至少需要 2 个孔洞中心，当前 {len(centroids_uv)}")
@@ -804,17 +1008,51 @@ def shelf_horizontal_from_hole_centroids(
     ordered = sorted(chosen, key=lambda p: float(p[0]))
     left_uv = np.asarray(ordered[0], dtype=np.float64)
     right_uv = np.asarray(ordered[-1], dtype=np.float64)
-    z_left = sample_depth_at(depth_m, float(left_uv[0]), float(left_uv[1]))
-    z_right = sample_depth_at(depth_m, float(right_uv[0]), float(right_uv[1]))
-    p_left = backproject(float(left_uv[0]), float(left_uv[1]), z_left, camera)
-    p_right = backproject(float(right_uv[0]), float(right_uv[1]), z_right, camera)
-    delta = p_right - p_left
-    dn = float(np.linalg.norm(delta))
+
+    n = max(2, int(num_samples))
+    ts = np.linspace(0.0, 1.0, n)
+    sample_uvs = np.asarray(
+        [(1.0 - t) * left_uv + t * right_uv for t in ts],
+        dtype=np.float64,
+    )
+
+    points_3d: List[np.ndarray] = []
+    sample_depths: List[float] = []
+    valid_uvs: List[List[float]] = []
+    for uv in sample_uvs:
+        try:
+            z = sample_depth_at(depth_m, float(uv[0]), float(uv[1]))
+        except ValueError:
+            continue
+        if not np.isfinite(z) or z <= 0:
+            continue
+        points_3d.append(backproject(float(uv[0]), float(uv[1]), z, camera))
+        sample_depths.append(float(z))
+        valid_uvs.append([round(float(uv[0]), 2), round(float(uv[1]), 2)])
+
+    if len(points_3d) < 2:
+        raise ValueError("孔洞水平线上有效深度点不足（<2）")
+
+    pts_arr = np.asarray(points_3d, dtype=np.float64)
+    inliers, keep_mask = _reject_depth_outliers(pts_arr, mad_ratio=2.5, min_keep=4)
+    if inliers.shape[0] < 2:
+        inliers = pts_arr
+
+    centered = inliers - inliers.mean(axis=0, keepdims=True)
+    _, _, vh = np.linalg.svd(centered, full_matrices=False)
+    direction = vh[0]
+    dn = float(np.linalg.norm(direction))
     if dn < 1e-9:
-        raise ValueError("孔洞中心 3D 方向退化")
-    horizontal = delta / dn
+        raise ValueError("孔洞水平线 3D 拟合方向退化")
+    horizontal = direction / dn
+    # 符号对齐：与最左→最右粗方向一致，并朝向相机 +X
+    rough = inliers[-1] - inliers[0]
+    if float(np.dot(horizontal, rough)) < 0:
+        horizontal = -horizontal
     if float(np.dot(horizontal, CAMERA_AXIS_X)) < 0:
         horizontal = -horizontal
+
+    z_in = inliers[:, 2]
     return horizontal, {
         "hole_count": len(centroids_uv),
         "row_used": chosen_label,
@@ -825,6 +1063,14 @@ def shelf_horizontal_from_hole_centroids(
         "left_uv": left_uv.round(2).tolist(),
         "right_uv": right_uv.round(2).tolist(),
         "span_px": round(float(np.linalg.norm(right_uv - left_uv)), 2),
+        "num_samples": n,
+        "num_valid_depth": int(pts_arr.shape[0]),
+        "num_inliers": int(inliers.shape[0]),
+        "sample_uvs": valid_uvs,
+        "sample_depths_m": [round(z, 6) for z in sample_depths],
+        "inlier_depth_m_median": round(float(np.median(z_in)), 6),
+        "inlier_depth_m_std": round(float(np.std(z_in)), 6),
+        "fit_method": "line_pca_after_depth_mad",
         "horizontal_camera": horizontal.round(6).tolist(),
     }
 
@@ -834,7 +1080,7 @@ def marker_rack_rotation_from_horizontal_and_plane(
     plane_normal: np.ndarray,
 ) -> Tuple[np.ndarray, Dict[str, float]]:
     """
-    货架姿态：X=孔洞连线水平方向，Z=面板/LED 平面法向，Y=Z×X。
+    货架姿态：X=孔洞连线水平方向，Z=面板法向（多孔 8 点联合），Y=Z×X。
     """
     z_axis = plane_normal / (np.linalg.norm(plane_normal) + 1e-12)
     if z_axis[2] < 0:
@@ -871,22 +1117,27 @@ def estimate_shelf_led_p1_pose(
     camera: CameraIntrinsics,
 ) -> Tuple[Pose6D, Dict[str, Any]]:
     """
-    货架 P1：蓝色 LED 圆心为像素中心；深度=外接正方形四角均值；
-    水平方向由面板圆形孔洞中心连线确定。
+    货架 P1：蓝色 LED 圆心为像素中心；深度由 LED 外切正方形 ABCD+abcd 共 8 点均值；
+    面板法向（Z）由**所有孔洞**各自 8 角点联合拟合；水平方向（X）由孔洞同排连线 PCA。
     """
     corners_uv, circle_center_uv = detect_circumscribed_square_corners_uv(led_mask)
     center_uv = np.asarray(circle_center_uv, dtype=np.float64)
+    corners_rot_uv = rotate_square_corners_uv_45(corners_uv, center_uv)
+    all_corners_uv = np.vstack([corners_uv, corners_rot_uv])
 
-    center_z, corner_depths = average_depth_at_uv_corners(
-        depth_m, corners_uv, mask=led_mask
+    center_z, all_corner_depths = average_depth_at_uv_corners(
+        depth_m, all_corners_uv, mask=led_mask
     )
+    corner_depths = all_corner_depths[:4]
+    corner_rot_depths = all_corner_depths[4:]
     position = backproject(float(center_uv[0]), float(center_uv[1]), center_z, camera)
 
-    corners_3d: List[np.ndarray] = []
-    for uv, z in zip(corners_uv, corner_depths):
-        corners_3d.append(backproject(float(uv[0]), float(uv[1]), z, camera))
-    corners_arr = np.asarray(corners_3d, dtype=np.float64)
-    _, plane_normal = fit_plane(corners_arr)
+    # LED 局部 8 点平面：仅作回退 / 对照，主法向改由所有孔洞联合拟合
+    led_corners_3d: List[np.ndarray] = []
+    for uv, z in zip(all_corners_uv, all_corner_depths):
+        led_corners_3d.append(backproject(float(uv[0]), float(uv[1]), z, camera))
+    led_corners_arr = np.asarray(led_corners_3d, dtype=np.float64)
+    _, led_plane_normal = fit_plane(led_corners_arr)
 
     hole_centroids: List[np.ndarray] = []
     hole_meta_list: List[Dict[str, Any]] = []
@@ -903,7 +1154,18 @@ def estimate_shelf_led_p1_pose(
             }
         )
 
-    rotation_method = "holes_horizontal_led_square_plane"
+    plane_source = "all_holes_square8_joint"
+    hole_plane_meta: Dict[str, Any] = {}
+    try:
+        plane_normal, hole_plane_meta = plane_normal_from_all_hole_eight_corners(
+            hole_masks, depth_m, camera
+        )
+    except ValueError as exc:
+        plane_normal = led_plane_normal
+        plane_source = "led_square8_fallback"
+        hole_plane_meta = {"fallback": str(exc), "method": plane_source}
+
+    rotation_method = "holes_horizontal_all_holes_square8_plane"
     hole_line_meta: Dict[str, Any] = {"holes_used": len(hole_centroids)}
     if len(hole_centroids) >= 2:
         horizontal, hole_line_meta = shelf_horizontal_from_hole_centroids(
@@ -914,11 +1176,14 @@ def estimate_shelf_led_p1_pose(
         )
     else:
         rotation, rack_diag = marker_rack_rotation_default_x_plane_normal(plane_normal)
-        rotation_method = "led_square_plane_x_cam_fallback"
+        rotation_method = f"{plane_source}_x_cam_fallback"
         hole_line_meta["fallback"] = "insufficient_holes"
 
     meta = {
         "method": "shelf_led_holes",
+        "frame": FRAME_CAMERA,
+        "preview_frame": PREVIEW_FRAME_GLB_Y_UP,
+        "axis_hint": FRAME_AXIS_HINT[FRAME_CAMERA],
         "center_uv": center_uv.round(2).tolist(),
         "circle_center_uv": circle_center_uv.round(2).tolist(),
         "center_method": "led_min_enclosing_circle_center",
@@ -928,10 +1193,21 @@ def estimate_shelf_led_p1_pose(
             "C": corners_uv[2].round(2).tolist(),
             "D": corners_uv[3].round(2).tolist(),
         },
+        "corners_rot45_uv": {
+            "a": corners_rot_uv[0].round(2).tolist(),
+            "b": corners_rot_uv[1].round(2).tolist(),
+            "c": corners_rot_uv[2].round(2).tolist(),
+            "d": corners_rot_uv[3].round(2).tolist(),
+        },
         "corner_depths_m": [round(d, 6) for d in corner_depths],
+        "corner_rot45_depths_m": [round(d, 6) for d in corner_rot_depths],
         "depth_center_m": round(center_z, 6),
-        "depth_method": "mean_of_square_corners_ABCD",
+        "depth_method": "mean_of_led_square_corners_ABCD_abcd_rot45",
+        "plane_points": int(hole_plane_meta.get("num_inliers") or 8),
         "plane_normal": plane_normal.round(6).tolist(),
+        "plane_source": plane_source,
+        "led_plane_normal": led_plane_normal.round(6).tolist(),
+        "hole_plane": hole_plane_meta,
         "rotation_method": rotation_method,
         "rack_diagnostics": rack_diag,
         "holes": hole_meta_list,

@@ -196,8 +196,12 @@ def _build_scene_with_optional_p1(
 
     if p1_pose is not None:
         origin_p1, rot_p1 = camera_pose_mm_to_glb(p1_pose.position_mm, p1_pose.rotation)
+        # 红色 X 轴加长到原来的 3 倍，便于看清货架水平方向
         p_pts, p_cols = inject_axis_points(
-            origin_p1, rot_p1, axis_length_mm=40.0, core_color=(255, 220, 0)
+            origin_p1,
+            rot_p1,
+            axis_length_mm=(120.0, 40.0, 40.0),
+            core_color=(255, 220, 0),
         )
         marker_pts.append(p_pts)
         marker_cols.append(p_cols)
@@ -205,7 +209,9 @@ def _build_scene_with_optional_p1(
             create_pose_marker_sphere(origin_p1, radius_mm=8.0, color_rgba=(255, 220, 0, 255))
         )
         geometries.append(
-            create_pose_axes_mesh(origin_p1, rot_p1, axis_length_mm=45.0, radius_mm=1.5)
+            create_pose_axes_mesh(
+                origin_p1, rot_p1, axis_length_mm=(135.0, 45.0, 45.0), radius_mm=1.5
+            )
         )
 
     for item in qi_list:
@@ -229,6 +235,8 @@ def _build_scene_with_optional_p1(
             round(float(origin_i[1]), 2),
             round(float(origin_i[2]), 2),
         ]
+        item["frame"] = "camera"
+        item["preview_frame"] = "glb_y_up"
 
     if marker_pts:
         points = (
@@ -275,6 +283,7 @@ def _build_scene_with_optional_p1(
         "pi_note": (
             "各实例：p_i=剔除外点后 Z 最小 → 球半径 8mm → 相机 y±2mm → q_i(xy 均值, z=p_i.z)；"
             "有 P1 时再按 q_i 的 P1-X |dx| 只保留最近 1 个用于显示；"
+            "数值 frame=camera；3D 预览 preview_frame=glb_y_up（Y 翻转）；"
             "JSON 含 p_i_mm / q_i_mm，候选见 instance_qi_all"
         ),
     }
@@ -656,7 +665,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                 )
                 out_abcd = gr.Image(
                     type="pil",
-                    label="ABCD 外接正方形放大（角点 / 深度）",
+                    label="ABCD+abcd 外接正方形放大（8 角点 / 深度）",
                     height=280,
                 )
                 out_pi = gr.Image(
@@ -675,7 +684,10 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
             "> **灰色**=背景；**彩色**=各 SAM3 实例；"
             "每实例先求 **p_i（Z 最小）**，再 **球半径 8mm** 后 **相机 y±2mm** 得 **q_i**（xy 均值，z=p_i.z）；"
             "有 P1 时再按 q_i 的 P1-X |dx| **只保留最近 1 个**。"
-            "黄球/短轴 = 标记 P1。详情见 JSON `instance_qi`（含 `p_i_mm` / `q_i_mm`）。"
+            "黄球/短轴 = 标记 P1。"
+            "**数值坐标系 `frame=camera`（X右 Y下 Z前）**；"
+            "**3D 预览 `preview_frame=glb_y_up`（点云与坐标轴均 Y 翻转后显示）**。"
+            "详情见 JSON `instance_qi`（含 `p_i_mm` / `q_i_mm`）。"
         )
         with gr.Row():
             with gr.Column(scale=4):
@@ -727,10 +739,10 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
             - 实例分割：SAM3 `POST /infer` + 文本提示，默认 API `{DEFAULT_SAM3_API_URL}`
               （快速预览拆成 **mask** / **bbox** 两张图）
             - **标记位 P1**（货架面板）：
-              1. 孔洞提示词分割所有圆形通孔 → 左右孔洞中心连线定 **水平 X**
+              1. 孔洞提示词分割所有圆形通孔 → 同一排最左→最右连线采 20 点，剔深度离群后 PCA 定 **水平 X**
               2. 蓝色 LED 提示词分割发光圆 → **圆心** 为 P1 像素中心
-              3. LED 外接正方形四角 **A–D** 深度均值 → P1 深度；LED 平面法向 + 孔洞水平 → 姿态
-              4. **ABCD 放大图**：单独裁剪 LED 外接正方形区域，标注角点与各角深度
+              3. **每个孔洞**同样取 ABCD+abcd 共 8 角点 → 全部孔洞角点联合拟合面板法向 Z；同排孔连线 PCA → 水平 X；LED 圆心 + LED 8 点深度 → P1 位置
+              4. **ABCD/abcd 放大图**：单独裁剪 LED 外接正方形区域，标注两组角点与各角深度
             - **抓取点 q**：最终保留的 q_i；左侧 JSON 的 `xyzrxryrz = [x,y,z,rx,ry,rz]`（xyz=mm，姿态=°，ZYX）
             - **实例 q_i**：先求 **p_i（Z 最小）** → **球 8mm** → **相机 y±2mm** → **q_i**（筛选点 **xy 均值**，**z 取 p_i.z**）
               → 有 P1 时再按 **P1-X |dx|** **只显示最近的 1 个**

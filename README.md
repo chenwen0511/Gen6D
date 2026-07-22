@@ -40,12 +40,13 @@ bash start.sh restart    # 默认 :8000；可用 DEVICE=cpu
    - 文档：[doc/sam6d_rest_api.md](doc/sam6d_rest_api.md)、[doc/pem.md](doc/pem.md)
 
 2. **抓取 位姿估计 Tab**（原 SAM3 分割，`55236af`）  
-   - 传感器深度实例分色点云；货架孔洞 + 蓝色 LED 标记位 → **P1**  
+   - 传感器深度实例分色点云；**各孔 ABCD/abcd 8 点联合定面板法向 Z**，孔排连线 PCA 定水平 X，LED 圆心/深度定 **P1**  
+   - 数值 `frame=camera`；3D 预览 `preview_frame=glb_y_up`（Y 翻转）  
    - 每实例：`p_i`（Z 最小）→ 预览 P1 / 实例点
 
 3. **抓取点 q + 预览拆分**（`2c59e71`）  
    - `p_i` 后先 **球半径 8mm** 初筛，再 **相机 y±2mm** 得 **`q_i`（xy 均值，z=p_i.z）**；按 P1-X `|dx|` **只保留最近 1 个** 作为夹爪抓取点  
-   - UI JSON：`[x,y,z,rx,ry,rz]`（xyz=mm，姿态=°）  
+   - UI JSON：`[x,y,z,rx,ry,rz]`（xyz=mm，姿态=°）；含 `frame` / `preview_frame`  
    - 实例分割预览拆成 **mask** / **bbox** 两张图（SAM3 Tab 与 SAM-6D ISM 均已支持）
 
 ---
@@ -105,8 +106,9 @@ RGB 图像 ──┬──► 分割模型 (YOLO / SAM2) ──► 分割掩码 
 
 - **6D 位姿**（SAM-6D）：物体相对于相机的旋转 + 平移  
 - **抓取点 q**（抓取 位姿估计 Tab）：`[x, y, z, rx, ry, rz]`  
-  - `x,y,z`：相机系位置，单位 **mm**  
-  - `rx,ry,rz`：姿态，单位 **°**（由 P1 旋转按 ZYX 欧拉角换算）
+  - `x,y,z`：相机系（`frame=camera`）位置，单位 **mm**  
+  - `rx,ry,rz`：姿态，单位 **°**（由 P1 旋转按 ZYX 欧拉角换算）  
+  - 3D 预览系：`preview_frame=glb_y_up`（相对相机系 Y 翻转）
 
 ---
 
