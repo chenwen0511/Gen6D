@@ -739,10 +739,11 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
             - 实例分割：SAM3 `POST /infer` + 文本提示，默认 API `{DEFAULT_SAM3_API_URL}`
               （快速预览拆成 **mask** / **bbox** 两张图）
             - **标记位 P1**（货架面板）：
-              1. 孔洞提示词分割所有圆形通孔 → 同一排最左→最右连线采 20 点，剔深度离群后 PCA 定 **水平 X**
+              1. 孔洞提示词分割所有圆形通孔 → 孔心反投影到 3D，按 PCA 分上下两排，**双平行线联合 SVD** 得共享方向定 **水平 X**（单排则退化为单线 PCA）
               2. 蓝色 LED 提示词分割发光圆 → **圆心** 为 P1 像素中心
-              3. **每个孔洞**同样取 ABCD+abcd 共 8 角点 → 全部孔洞角点联合拟合面板法向 Z；同排孔连线 PCA → 水平 X；LED 圆心 + LED 8 点深度 → P1 位置
+              3. **每个孔洞**同样取 ABCD+abcd 共 8 角点 → 全部孔洞角点联合拟合面板法向 Z；LED 圆心 + LED 8 点深度 → P1 位置
               4. **ABCD/abcd 放大图**：单独裁剪 LED 外接正方形区域，标注两组角点与各角深度
+              5. P1 预览可画出上下两排孔拟合线（`holes H/top` / `holes H/bottom`）
             - **抓取点 q**：最终保留的 q_i；左侧 JSON 的 `xyzrxryrz = [x,y,z,rx,ry,rz]`（xyz=mm，姿态=°，ZYX）
             - **实例 q_i**：先求 **p_i（Z 最小）** → **球 8mm** → **相机 y±2mm** → **q_i**（筛选点 **xy 均值**，**z 取 p_i.z**）
               → 有 P1 时再按 **P1-X |dx|** **只显示最近的 1 个**

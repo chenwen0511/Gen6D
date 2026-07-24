@@ -270,15 +270,39 @@ def render_shelf_p1_visualization(
         cv2.polylines(overlay, [np.array(rot_pts, dtype=np.int32)], True, (0, 165, 255), 2, cv2.LINE_AA)
 
     hole_line = (pose_meta or {}).get("hole_line") or {}
-    left_uv = hole_line.get("left_uv")
-    right_uv = hole_line.get("right_uv")
-    if left_uv and right_uv:
-        line_p0 = (int(round(left_uv[0])), int(round(left_uv[1])))
-        line_p1 = (int(round(right_uv[0])), int(round(right_uv[1])))
-        cv2.line(overlay, line_p0, line_p1, (0, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(
-            overlay, "holes H", (line_p0[0], line_p0[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2, cv2.LINE_AA
-        )
+    rows = hole_line.get("rows") or []
+    line_colors = ((0, 255, 255), (0, 200, 255))  # cyan / warm-cyan
+    if rows:
+        for i, row in enumerate(rows):
+            left_uv = row.get("fit_left_uv") or row.get("left_uv")
+            right_uv = row.get("fit_right_uv") or row.get("right_uv")
+            if not left_uv or not right_uv:
+                continue
+            line_p0 = (int(round(left_uv[0])), int(round(left_uv[1])))
+            line_p1 = (int(round(right_uv[0])), int(round(right_uv[1])))
+            color = line_colors[i % len(line_colors)]
+            cv2.line(overlay, line_p0, line_p1, color, 2, cv2.LINE_AA)
+            label = row.get("label") or f"H{i + 1}"
+            cv2.putText(
+                overlay,
+                f"holes H/{label}",
+                (line_p0[0], line_p0[1] - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+    else:
+        left_uv = hole_line.get("left_uv")
+        right_uv = hole_line.get("right_uv")
+        if left_uv and right_uv:
+            line_p0 = (int(round(left_uv[0])), int(round(left_uv[1])))
+            line_p1 = (int(round(right_uv[0])), int(round(right_uv[1])))
+            cv2.line(overlay, line_p0, line_p1, (0, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(
+                overlay, "holes H", (line_p0[0], line_p0[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2, cv2.LINE_AA
+            )
 
     p1_uv = project_point(p1.position_m, camera)
     if p1_uv:
@@ -310,7 +334,7 @@ def render_shelf_p1_visualization(
             f"holes: {hole_count}, rotation: {rot_method}",
             "frame=camera (X right,Y down,Z fwd)",
             "3D preview=glb_y_up (Y flipped)",
-            "X=hole horizontal, Z=joint hole planes, Y=Z×X",
+            "X=holes parallel lines 3D, Z=joint hole planes, Y=Z×X",
         ],
     )
     return Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))

@@ -920,27 +920,6 @@ def plane_normal_from_all_hole_eight_corners(
     return normal, meta
 
 
-def _split_holes_into_rows(
-    centroids_uv: List[np.ndarray],
-) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    """按图像 v 坐标将孔洞分为上下两排（k-means k=2 on v）。"""
-    vs = np.array([float(p[1]) for p in centroids_uv])
-    v_sorted = np.sort(vs)
-    mid = float(np.median(vs))
-    if len(v_sorted) >= 4:
-        gaps = np.diff(v_sorted)
-        split_idx = int(np.argmax(gaps))
-        mid = 0.5 * (v_sorted[split_idx] + v_sorted[split_idx + 1])
-    row_top: List[np.ndarray] = []
-    row_bot: List[np.ndarray] = []
-    for p in centroids_uv:
-        if float(p[1]) <= mid:
-            row_top.append(p)
-        else:
-            row_bot.append(p)
-    return row_top, row_bot
-
-
 def _reject_depth_outliers(
     points_3d: np.ndarray,
     *,
@@ -955,15 +934,168 @@ def _reject_depth_outliers(
     med = float(np.median(z))
     mad = float(np.median(np.abs(z - med)))
     if mad < 1e-6:
-        # 深度几乎一致，全部保留
         return pts, np.ones((pts.shape[0],), dtype=bool)
     keep = np.abs(z - med) <= (mad_ratio * 1.4826 * mad)
     if int(keep.sum()) < min_keep:
-        # 过严时回退：按 |z-median| 保留最近的 min_keep 个
         order = np.argsort(np.abs(z - med))
         keep = np.zeros_like(keep)
         keep[order[: min(min_keep, pts.shape[0])]] = True
     return pts[keep], keep
+
+
+def _point_line_residual_m(points: np.ndarray, origin: np.ndarray, direction: np.ndarray) -> np.ndarray:
+    """点到 3D 直线的垂直距离（米）。"""
+    d = direction / (np.linalg.norm(direction) + 1e-12)
+    delta = points - origin.reshape(1, 3)
+    parallel = (delta @ d).reshape(-1, 1) * d.reshape(1, 3)
+    return np.linalg.norm(delta - parallel, axis=1)
+
+
+def _split_hole_rows_by_pca(
+    points_3d: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+    """
+    在 3D 上按 PCA 第二主成分分成两排。
+
+    返回 (row_a_mask, row_b_mask, meta)。若无法分成两排，则 row_b 全 False。
+    """
+    pts = np.asarray(points_3d, dtype=np.float64)
+    n = int(pts.shape[0])
+    all_a = np.ones((n,), dtype=bool)
+    none_b = np.zeros((n,), dtype=bool)
+    meta: Dict[str, Any] = {"split": "none", "n": n}
+    if n < 4:
+        meta["split"] = "too_few_for_two_rows"
+        return all_a, none_b, meta
+
+    centered = pts - pts.mean(axis=0, keepdims=True)
+    _, s, vh = np.linalg.svd(centered, full_matrices=False)
+    d0 = vh[0]
+    # 跨排方向：优先用第二主轴；退化时用 d0 × 相机视线
+    if s.shape[0] >= 2 and float(s[1]) > 1e-6 * float(s[0]):
+        v_perp = vh[1]
+    else:
+        v_perp = np.cross(d0, CAMERA_AXIS_Z)
+        if float(np.linalg.norm(v_perp)) < 1e-9:
+            v_perp = np.cross(d0, CAMERA_AXIS_Y)
+        v_perp = v_perp / (np.linalg.norm(v_perp) + 1e-12)
+
+    proj = centered @ v_perp
+    order = np.argsort(proj)
+    proj_sorted = proj[order]
+    gaps = np.diff(proj_sorted)
+    if gaps.size == 0:
+        meta["split"] = "no_gap"
+        return all_a, none_b, meta
+
+    split_idx = int(np.argmax(gaps))
+    gap = float(gaps[split_idx])
+    other = np.delete(gaps, split_idx)
+    median_other = float(np.median(other)) if other.size else 0.0
+    # 最大间隔应显著大于排内相邻间隔；绝对下限约 3mm
+    if gap < max(0.003, 2.0 * median_other + 1e-6):
+        meta["split"] = "gap_too_small"
+        meta["gap_m"] = round(gap, 6)
+        meta["median_other_gap_m"] = round(median_other, 6)
+        return all_a, none_b, meta
+
+    mid = 0.5 * (proj_sorted[split_idx] + proj_sorted[split_idx + 1])
+    row_a = proj <= mid
+    row_b = ~row_a
+    if int(row_a.sum()) < 2 or int(row_b.sum()) < 2:
+        meta["split"] = "unbalanced"
+        meta["gap_m"] = round(gap, 6)
+        return all_a, none_b, meta
+
+    # 标记「上/下」：相机 Y 更小（图像更高）为一排
+    mean_y_a = float(np.mean(pts[row_a, 1]))
+    mean_y_b = float(np.mean(pts[row_b, 1]))
+    if mean_y_a > mean_y_b:
+        row_a, row_b = row_b, row_a
+        mean_y_a, mean_y_b = mean_y_b, mean_y_a
+
+    meta.update(
+        {
+            "split": "pca_perp_gap",
+            "gap_m": round(gap, 6),
+            "row_top_count": int(row_a.sum()),
+            "row_bot_count": int(row_b.sum()),
+            "row_spacing_m": round(abs(mean_y_b - mean_y_a), 6),
+            "singular_values": [round(float(x), 6) for x in s[:3].tolist()],
+        }
+    )
+    return row_a, row_b, meta
+
+
+def _fit_shared_direction_two_rows(
+    points_3d: np.ndarray,
+    row_masks: List[np.ndarray],
+) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+    """两排点云：各排去质心后联合 SVD，得到共享方向；返回方向与每排残差摘要。"""
+    pts = np.asarray(points_3d, dtype=np.float64)
+    demeaned: List[np.ndarray] = []
+    row_infos: List[Dict[str, Any]] = []
+    for mask in row_masks:
+        row = pts[mask]
+        if row.shape[0] == 0:
+            continue
+        origin = row.mean(axis=0)
+        demeaned.append(row - origin.reshape(1, 3))
+        row_infos.append(
+            {
+                "count": int(row.shape[0]),
+                "origin_m": origin,
+                "mask": mask,
+            }
+        )
+    if not demeaned:
+        raise ValueError("无有效孔排用于平行线拟合")
+
+    stacked = np.vstack(demeaned)
+    if stacked.shape[0] < 2:
+        raise ValueError("平行线拟合点数不足")
+    _, _, vh = np.linalg.svd(stacked, full_matrices=False)
+    direction = vh[0]
+    dn = float(np.linalg.norm(direction))
+    if dn < 1e-9:
+        raise ValueError("平行线共享方向退化")
+    direction = direction / dn
+
+    for info in row_infos:
+        row = pts[info["mask"]]
+        resid = _point_line_residual_m(row, info["origin_m"], direction)
+        info["residual_rms_m"] = float(np.sqrt(np.mean(resid ** 2)))
+        info["residual_max_m"] = float(np.max(resid))
+        info["residuals_m"] = resid
+    return direction, row_infos
+
+
+def _reject_line_outliers(
+    points_3d: np.ndarray,
+    row_infos: List[Dict[str, Any]],
+    direction: np.ndarray,
+    *,
+    mad_ratio: float = 3.0,
+    min_keep_per_row: int = 2,
+) -> np.ndarray:
+    """按到所属平行线的残差 MAD 剔除离群孔心，返回 keep_mask。"""
+    pts = np.asarray(points_3d, dtype=np.float64)
+    keep = np.zeros((pts.shape[0],), dtype=bool)
+    for info in row_infos:
+        mask = np.asarray(info["mask"], dtype=bool)
+        resid = _point_line_residual_m(pts[mask], info["origin_m"], direction)
+        med = float(np.median(resid))
+        mad = float(np.median(np.abs(resid - med))) + 1e-9
+        local_keep = resid <= (med + mad_ratio * 1.4826 * mad)
+        if int(local_keep.sum()) < min_keep_per_row:
+            order = np.argsort(resid)
+            local_keep = np.zeros_like(local_keep)
+            local_keep[order[: min(min_keep_per_row, resid.shape[0])]] = True
+        idxs = np.flatnonzero(mask)
+        keep[idxs[local_keep]] = True
+    if int(keep.sum()) < 2:
+        return np.ones((pts.shape[0],), dtype=bool)
+    return keep
 
 
 def shelf_horizontal_from_hole_centroids(
@@ -976,101 +1108,160 @@ def shelf_horizontal_from_hole_centroids(
     """
     多个圆形孔洞中心 → 货架水平方向（相机系 3D 单位向量）。
 
-    1. 按 v 分上下两排，选跨度更大的一排
-    2. 在最左→最右连线上均匀取 num_samples 个像素点
-    3. 反投影到 3D，按深度 MAD 剔除外点
-    4. 对剩余点做 PCA/SVD，主方向即为红轴（水平）
+    稳健 3D 双平行线（替换旧「单排 UV 连线采样 + PCA」）：
+    1. 各孔心反投影到 3D，深度 MAD 剔除外点
+    2. PCA 第二轴分上下两排（排间距过小则退化为单线）
+    3. 两排共享方向：各排去质心后联合 SVD（平行线约束）
+    4. 按线残差再剔一次外点并重拟合
+    5. 符号对齐左→右与相机 +X
+
+    ``num_samples`` 保留以兼容旧调用，不再使用。
     """
+    del num_samples  # 兼容旧签名
     if len(centroids_uv) < 2:
         raise ValueError(f"至少需要 2 个孔洞中心，当前 {len(centroids_uv)}")
 
-    row_top, row_bot = _split_holes_into_rows(centroids_uv)
-
-    def _row_span(row: List[np.ndarray]) -> float:
-        if len(row) < 2:
-            return 0.0
-        us = [float(p[0]) for p in row]
-        return max(us) - min(us)
-
-    if _row_span(row_top) >= _row_span(row_bot) and len(row_top) >= 2:
-        chosen = row_top
-        chosen_label = "top"
-    elif len(row_bot) >= 2:
-        chosen = row_bot
-        chosen_label = "bottom"
-    elif len(row_top) >= 2:
-        chosen = row_top
-        chosen_label = "top"
-    else:
-        chosen = centroids_uv
-        chosen_label = "all_fallback"
-
-    ordered = sorted(chosen, key=lambda p: float(p[0]))
-    left_uv = np.asarray(ordered[0], dtype=np.float64)
-    right_uv = np.asarray(ordered[-1], dtype=np.float64)
-
-    n = max(2, int(num_samples))
-    ts = np.linspace(0.0, 1.0, n)
-    sample_uvs = np.asarray(
-        [(1.0 - t) * left_uv + t * right_uv for t in ts],
-        dtype=np.float64,
-    )
-
     points_3d: List[np.ndarray] = []
-    sample_depths: List[float] = []
-    valid_uvs: List[List[float]] = []
-    for uv in sample_uvs:
-        try:
-            z = sample_depth_at(depth_m, float(uv[0]), float(uv[1]))
-        except ValueError:
+    valid_uvs: List[np.ndarray] = []
+    depths: List[float] = []
+    for uv in centroids_uv:
+        uv_arr = np.asarray(uv, dtype=np.float64).reshape(2)
+        pt = backproject_uv_with_depth(uv_arr, depth_m, camera, depth_radius=3)
+        if pt is None:
             continue
+        z = float(pt[2])
         if not np.isfinite(z) or z <= 0:
             continue
-        points_3d.append(backproject(float(uv[0]), float(uv[1]), z, camera))
-        sample_depths.append(float(z))
-        valid_uvs.append([round(float(uv[0]), 2), round(float(uv[1]), 2)])
+        points_3d.append(pt)
+        valid_uvs.append(uv_arr)
+        depths.append(z)
 
     if len(points_3d) < 2:
-        raise ValueError("孔洞水平线上有效深度点不足（<2）")
+        raise ValueError("孔洞中心有效深度点不足（<2）")
 
     pts_arr = np.asarray(points_3d, dtype=np.float64)
-    inliers, keep_mask = _reject_depth_outliers(pts_arr, mad_ratio=2.5, min_keep=4)
+    uvs_arr = np.asarray(valid_uvs, dtype=np.float64)
+    inliers, depth_keep = _reject_depth_outliers(
+        pts_arr, mad_ratio=2.5, min_keep=min(4, pts_arr.shape[0])
+    )
+    uvs_in = uvs_arr[depth_keep]
     if inliers.shape[0] < 2:
         inliers = pts_arr
+        uvs_in = uvs_arr
 
-    centered = inliers - inliers.mean(axis=0, keepdims=True)
-    _, _, vh = np.linalg.svd(centered, full_matrices=False)
-    direction = vh[0]
-    dn = float(np.linalg.norm(direction))
-    if dn < 1e-9:
-        raise ValueError("孔洞水平线 3D 拟合方向退化")
-    horizontal = direction / dn
-    # 符号对齐：与最左→最右粗方向一致，并朝向相机 +X
-    rough = inliers[-1] - inliers[0]
+    row_top_mask, row_bot_mask, split_meta = _split_hole_rows_by_pca(inliers)
+    use_two_rows = (
+        split_meta.get("split") == "pca_perp_gap"
+        and int(row_top_mask.sum()) >= 2
+        and int(row_bot_mask.sum()) >= 2
+    )
+
+    if use_two_rows:
+        direction, row_infos = _fit_shared_direction_two_rows(
+            inliers, [row_top_mask, row_bot_mask]
+        )
+        line_keep = _reject_line_outliers(inliers, row_infos, direction)
+        if int(line_keep.sum()) >= 4 and int(line_keep.sum()) < inliers.shape[0]:
+            inliers = inliers[line_keep]
+            uvs_in = uvs_in[line_keep]
+            row_top_mask, row_bot_mask, split_meta = _split_hole_rows_by_pca(inliers)
+            if (
+                split_meta.get("split") == "pca_perp_gap"
+                and int(row_top_mask.sum()) >= 2
+                and int(row_bot_mask.sum()) >= 2
+            ):
+                direction, row_infos = _fit_shared_direction_two_rows(
+                    inliers, [row_top_mask, row_bot_mask]
+                )
+                use_two_rows = True
+            else:
+                use_two_rows = False
+        fit_method = "parallel_lines_3d_joint_svd"
+    else:
+        fit_method = "single_line_3d_pca_fallback"
+        row_infos = []
+
+    if not use_two_rows:
+        centered = inliers - inliers.mean(axis=0, keepdims=True)
+        _, _, vh = np.linalg.svd(centered, full_matrices=False)
+        direction = vh[0]
+        dn = float(np.linalg.norm(direction))
+        if dn < 1e-9:
+            raise ValueError("孔洞水平线 3D 拟合方向退化")
+        direction = direction / dn
+        origin = inliers.mean(axis=0)
+        resid = _point_line_residual_m(inliers, origin, direction)
+        row_infos = [
+            {
+                "count": int(inliers.shape[0]),
+                "origin_m": origin,
+                "mask": np.ones((inliers.shape[0],), dtype=bool),
+                "residual_rms_m": float(np.sqrt(np.mean(resid ** 2))),
+                "residual_max_m": float(np.max(resid)),
+                "label": "all",
+            }
+        ]
+
+    horizontal = np.asarray(direction, dtype=np.float64)
+    # 符号：沿图像 u 增大方向（左→右），并朝向相机 +X
+    order_u = np.argsort(uvs_in[:, 0])
+    rough = inliers[order_u[-1]] - inliers[order_u[0]]
     if float(np.dot(horizontal, rough)) < 0:
         horizontal = -horizontal
     if float(np.dot(horizontal, CAMERA_AXIS_X)) < 0:
         horizontal = -horizontal
 
+    rows_meta: List[Dict[str, Any]] = []
+    for idx, info in enumerate(row_infos):
+        mask = np.asarray(info["mask"], dtype=bool)
+        row_pts = inliers[mask]
+        row_uvs = uvs_in[mask]
+        order = np.argsort(row_uvs[:, 0])
+        left_uv = row_uvs[order[0]]
+        right_uv = row_uvs[order[-1]]
+        # 用拟合直线在端点参数处的投影，便于可视化更贴合 3D 线
+        origin = np.asarray(info["origin_m"], dtype=np.float64)
+        t = (row_pts - origin.reshape(1, 3)) @ horizontal
+        p_left = origin + float(np.min(t)) * horizontal
+        p_right = origin + float(np.max(t)) * horizontal
+        proj_left = project_point(p_left, camera)
+        proj_right = project_point(p_right, camera)
+        label = info.get("label") or ("top" if idx == 0 and use_two_rows else "bottom" if use_two_rows else "all")
+        if use_two_rows:
+            label = "top" if idx == 0 else "bottom"
+        entry = {
+            "label": label,
+            "count": int(row_pts.shape[0]),
+            "left_uv": left_uv.round(2).tolist(),
+            "right_uv": right_uv.round(2).tolist(),
+            "fit_left_uv": list(proj_left) if proj_left else left_uv.round(2).tolist(),
+            "fit_right_uv": list(proj_right) if proj_right else right_uv.round(2).tolist(),
+            "origin_m": origin.round(6).tolist(),
+            "residual_rms_mm": round(float(info["residual_rms_m"]) * 1000.0, 3),
+            "residual_max_mm": round(float(info["residual_max_m"]) * 1000.0, 3),
+            "span_px": round(float(np.linalg.norm(right_uv - left_uv)), 2),
+        }
+        rows_meta.append(entry)
+
+    # 兼容旧可视化：主线取孔数更多的一排（或唯一一排）
+    primary = max(rows_meta, key=lambda r: r["count"]) if rows_meta else None
     z_in = inliers[:, 2]
     return horizontal, {
         "hole_count": len(centroids_uv),
-        "row_used": chosen_label,
-        "row_top_count": len(row_top),
-        "row_bot_count": len(row_bot),
-        "row_holes_used": len(chosen),
-        "centroids_uv": [np.asarray(p, dtype=np.float64).round(2).tolist() for p in ordered],
-        "left_uv": left_uv.round(2).tolist(),
-        "right_uv": right_uv.round(2).tolist(),
-        "span_px": round(float(np.linalg.norm(right_uv - left_uv)), 2),
-        "num_samples": n,
         "num_valid_depth": int(pts_arr.shape[0]),
         "num_inliers": int(inliers.shape[0]),
-        "sample_uvs": valid_uvs,
-        "sample_depths_m": [round(z, 6) for z in sample_depths],
+        "centroids_uv": uvs_in.round(2).tolist(),
+        "centroid_depths_m": [round(float(z), 6) for z in inliers[:, 2].tolist()],
         "inlier_depth_m_median": round(float(np.median(z_in)), 6),
         "inlier_depth_m_std": round(float(np.std(z_in)), 6),
-        "fit_method": "line_pca_after_depth_mad",
+        "split": split_meta,
+        "rows": rows_meta,
+        "row_top_count": int(rows_meta[0]["count"]) if use_two_rows and rows_meta else (rows_meta[0]["count"] if rows_meta else 0),
+        "row_bot_count": int(rows_meta[1]["count"]) if use_two_rows and len(rows_meta) > 1 else 0,
+        "left_uv": primary["fit_left_uv"] if primary else None,
+        "right_uv": primary["fit_right_uv"] if primary else None,
+        "span_px": primary["span_px"] if primary else None,
+        "fit_method": fit_method,
         "horizontal_camera": horizontal.round(6).tolist(),
     }
 
@@ -1118,7 +1309,8 @@ def estimate_shelf_led_p1_pose(
 ) -> Tuple[Pose6D, Dict[str, Any]]:
     """
     货架 P1：蓝色 LED 圆心为像素中心；深度由 LED 外切正方形 ABCD+abcd 共 8 点均值；
-    面板法向（Z）由**所有孔洞**各自 8 角点联合拟合；水平方向（X）由孔洞同排连线 PCA。
+    面板法向（Z）由**所有孔洞**各自 8 角点联合拟合；
+    水平方向（X）由孔心 3D **双平行线联合拟合**（共享方向）。
     """
     corners_uv, circle_center_uv = detect_circumscribed_square_corners_uv(led_mask)
     center_uv = np.asarray(circle_center_uv, dtype=np.float64)
@@ -1165,7 +1357,7 @@ def estimate_shelf_led_p1_pose(
         plane_source = "led_square8_fallback"
         hole_plane_meta = {"fallback": str(exc), "method": plane_source}
 
-    rotation_method = "holes_horizontal_all_holes_square8_plane"
+    rotation_method = "holes_parallel_lines_all_holes_square8_plane"
     hole_line_meta: Dict[str, Any] = {"holes_used": len(hole_centroids)}
     if len(hole_centroids) >= 2:
         horizontal, hole_line_meta = shelf_horizontal_from_hole_centroids(

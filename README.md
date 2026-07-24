@@ -40,7 +40,7 @@ bash start.sh restart    # 默认 :8000；可用 DEVICE=cpu
    - 文档：[doc/sam6d_rest_api.md](doc/sam6d_rest_api.md)、[doc/pem.md](doc/pem.md)
 
 2. **抓取 位姿估计 Tab**（原 SAM3 分割，`55236af`）  
-   - 传感器深度实例分色点云；**各孔 ABCD/abcd 8 点联合定面板法向 Z**，孔排连线 PCA 定水平 X，LED 圆心/深度定 **P1**  
+   - 传感器深度实例分色点云；**各孔 ABCD/abcd 8 点联合定面板法向 Z**，孔心 3D **双平行线联合拟合**定水平 X，LED 圆心/深度定 **P1**  
    - 数值 `frame=camera`；3D 预览 `preview_frame=glb_y_up`（Y 翻转）  
    - 每实例：`p_i`（Z 最小）→ 预览 P1 / 实例点
 
