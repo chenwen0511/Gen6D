@@ -14,38 +14,37 @@ from src.depth.service import (
     DepthService,
     load_intrinsics_from_dict,
     load_sensor_depth_from_image,
+    normalize_camera_json,
 )
+from src.depth.pointcloud import DEFAULT_RGB_SHIFT_XY
 from src.grasp.ui import build_point_sam_pem_tab
 from src.grasp.sam3_tab import build_sam3_seg_tab
 
 
 def parse_camera_json_file(file_path: str | None) -> tuple:
     if file_path is None:
-        return None, 1.0
+        return None, 1.0, None
 
     path = Path(file_path)
     try:
         with path.open(encoding="utf-8") as f:
-            data = json.load(f)
+            raw = json.load(f)
+        data = normalize_camera_json(raw)
         intrinsics = load_intrinsics_from_dict(data)
         depth_scale = float(data.get("depth_scale", 1.0))
-        return intrinsics, depth_scale
-    except json.JSONDecodeError as exc:
+        return intrinsics, depth_scale, data
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
         raise gr.Error(f"内参 JSON 格式错误: {exc}") from exc
     except OSError as exc:
         raise gr.Error(f"无法读取内参文件: {exc}") from exc
 
 
 def build_ui(service: DepthService) -> gr.Blocks:
-    def run_upload(rgb, depth_file, intrinsics_file):
+    def run_upload(rgb, depth_file, intrinsics_file, rgb_shift_x, rgb_shift_y):
         if rgb is None:
             raise gr.Error("请上传 RGB 图像")
 
-        intrinsics, depth_scale = parse_camera_json_file(intrinsics_file)
-        intrinsics_data = None
-        if intrinsics_file is not None:
-            with Path(intrinsics_file).open(encoding="utf-8") as f:
-                intrinsics_data = json.load(f)
+        intrinsics, depth_scale, intrinsics_data = parse_camera_json_file(intrinsics_file)
 
         sensor_depth = None
         if depth_file is not None:
@@ -64,6 +63,8 @@ def build_ui(service: DepthService) -> gr.Blocks:
             depth_path=depth_file,
             intrinsics_path=intrinsics_file,
             intrinsics_data=intrinsics_data,
+            rgb_shift_x=rgb_shift_x,
+            rgb_shift_y=rgb_shift_y,
         )
         info = json.dumps(result.to_summary(), indent=2, ensure_ascii=False)
 
@@ -114,6 +115,22 @@ def build_ui(service: DepthService) -> gr.Blocks:
                         file_types=[".json"],
                         type="filepath",
                     )
+
+                with gr.Row():
+                    rgb_shift_x = gr.Number(
+                        label="点云上色：RGB 右移 dx（像素，+右）",
+                        value=float(DEFAULT_RGB_SHIFT_XY[0]),
+                        precision=0,
+                    )
+                    rgb_shift_y = gr.Number(
+                        label="点云上色：RGB 下移 dy（像素，+下）",
+                        value=float(DEFAULT_RGB_SHIFT_XY[1]),
+                        precision=0,
+                    )
+                gr.Markdown(
+                    "> **点云 RGB 偏移**：仅影响 3D 点云上色（默认 dx=-45，与 graspnet SAM3+GraspNet 一致）；"
+                    "也可用 `camera.json` 的 `rgb_shift:[dx,dy]`。不影响深度融合几何。"
+                )
 
                 upload_btn = gr.Button("运行推理", variant="primary", size="lg")
 
@@ -181,7 +198,7 @@ def build_ui(service: DepthService) -> gr.Blocks:
 
                 upload_btn.click(
                     run_upload,
-                    inputs=[rgb_input, depth_input, intrinsics_input],
+                    inputs=[rgb_input, depth_input, intrinsics_input, rgb_shift_x, rgb_shift_y],
                     outputs=[
                         out_sensor,
                         out_pred,

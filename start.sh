@@ -7,7 +7,7 @@ LOG_DIR="${ROOT_DIR}/logs"
 PID_DIR="${ROOT_DIR}/.pids"
 
 API_HOST="${API_HOST:-0.0.0.0}"
-API_PORT="${API_PORT:-8000}"
+API_PORT="${API_PORT:-19000}"
 MODEL_DIR="${MODEL_DIR:-/home/ubuntu/stephen/02-weight/depth-anything/DA3-SMALL}"
 DEVICE="${DEVICE:-cuda}"
 STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-180}"

@@ -6,7 +6,7 @@
     "timeout_s": 120
   },
   "sam3": {
-    "api_url": "http://192.168.100.220:18003/infer",
+    "api_url": "http://127.0.0.1:18003/infer",
     "prompt": "Plastic Reel Connected With Tape",
     "threshold": 0.41,
     "mask_threshold": 0.5,
@@ -23,7 +23,7 @@
     "cad_path": "/home/ubuntu/stephen/01-code/Gen6D/CAD_model/tray_180mm_object_frame_mm.obj",
     "seg_backend": "sam3",
     "det_score_thresh": 0.3,
-    "depth_source": "fused"
+    "depth_source": "sensor"
   },
   "place": {
     "hole_prompt": "All small circular through holes on the gray flat metal shelf panel in horizontal",

@@ -19,5 +19,6 @@ class FusionConfig:
     boundary_width: int = 5
     guided_radius: int = 8
     guided_eps: float = 1e-2
-    enable_boundary_blend: bool = True
+    # 默认硬替换：有效区=传感器，黑洞=对齐后的估计；边界混合易产生双影/光晕
+    enable_boundary_blend: bool = False
     enable_guided_smooth: bool = False

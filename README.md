@@ -8,21 +8,21 @@
 
 ```bash
 cd /home/ubuntu/stephen/01-code/Gen6D
-bash start.sh restart    # 默认 :8000；可用 DEVICE=cpu
+bash start.sh restart    # 默认 :19000；可用 DEVICE=cpu / API_PORT=...
 ```
 
 | 入口 | URL |
 |------|-----|
-| Web UI | `http://<host>:8000/ui` |
-| API Docs | `http://<host>:8000/docs` |
+| Web UI | `http://<host>:19000/ui` |
+| API Docs | `http://<host>:19000/docs` |
 
-配置见 `config/grasp_config.json`（SAM3 / SAM-6D / 标记位 place 默认项）。
+配置见 `config/grasp_config.json`（SAM3 / SAM-6D / 标记位 place 默认项；`pem.depth_source` 默认 `sensor`）。
 
 ### Web UI 页签
 
 | 页签 | 作用 |
 |------|------|
-| **深度估计** | 传感器深度 + DA3 估计 + 融合深度可视化 / 点云 |
+| **深度估计** | 传感器深度 + DA3 估计 + 融合深度可视化 / 点云；点云上色支持 RGB 偏移（默认 dx=-45） |
 | **抓取 位姿估计** | 实例分割 + 标记位 P1 → 抓取点 `q`（`xyzrxryrz`） |
 | **融合深度 + SAM-6D** | 融合或传感器深度 → SAM-6D（`seg_backend=sam3`）6D 位姿 |
 
@@ -126,13 +126,14 @@ D_metric_est = s · D_est + t
 
 将对齐后的估计深度映射到传感器物理度量空间。
 
-### Step 2：掩码替换与引导滤波融合
+### Step 2：掩码硬替换（默认）
 
 | 区域 | 策略 |
 |------|------|
-| 传感器高置信度区域 | **保留**原始传感器深度 |
+| 传感器有效区域 | **保留**原始传感器深度 |
 | 深度缺失（黑洞）区域 | 用对齐后的 `D_metric_est` **填补** |
-| 边界过渡 | 以 RGB 为引导，使用 Guided Filter / Joint Bilateral Filter 平滑，避免深度跳变影响法线计算 |
+
+默认关闭边界混合与引导滤波（二者易在物体轮廓产生双影）。位姿估计若更看重尺度可信，可直接选 **传感器深度**，跳过融合。
 
 ### Step 3：赋能下游位姿估计
 

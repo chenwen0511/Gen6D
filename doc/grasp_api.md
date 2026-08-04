@@ -13,7 +13,7 @@
 | `POST` | **`/api/v1/infer/grasp`** | 推荐正式路径 |
 | `POST` | **`/infer/grasp`** | 短别名，行为相同 |
 
-Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
+Base：`http://<host>:19000`（与 UI 同进程，`bash start.sh`；可用 `API_PORT` 覆盖）
 
 ---
 
@@ -28,7 +28,7 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
 | `camera` | file | 条件 | `camera.json` 文件（与 `camera_json` 二选一） |
 | `camera_json` | string | 条件 | 内参 JSON 字符串（与 `camera` 二选一） |
 | `prompt` | string | 否 | 实例 SAM3 提示词（默认读配置） |
-| `hole_prompt` | string | 否 | 货架面板圆形孔洞 SAM3 提示词（定水平 X + 联合定面板法向 Z） |
+| `hole_prompt` | string | 否 | 货架面板圆形孔洞 SAM3 提示词（孔心双平行线定水平 X + 联合定面板法向 Z） |
 | `led_prompt` | string | 否 | 蓝色 LED 圆形标记 SAM3 提示词（定 P1 像素中心） |
 | `marker_prompt` | string | 否 | 兼容旧字段，等同 `led_prompt` |
 | `enable_marker_p1` | bool | 否 | 是否识别孔洞 + LED 并计算 P1，默认 `true` |
@@ -47,6 +47,8 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
   "depth_scale": 1.0
 }
 ```
+
+也支持直接传 9 元数组作为 `cam_K`。深度估计页点云上色另支持可选字段 `rgb_shift` / `color_shift`（`[dx, dy]`，默认 `[-45, 0]`），不影响抓取几何。
 
 ---
 
@@ -104,7 +106,7 @@ Base：`http://<host>:8000`（与 UI 同进程，`bash start.sh`）
 ## curl 示例
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/api/v1/infer/grasp" \
+curl -s -X POST "http://127.0.0.1:19000/api/v1/infer/grasp" \
   -F "rgb=@samples/20260712_134531/rgb.png" \
   -F "depth=@samples/20260712_134531/depth.png" \
   -F "camera=@samples/20260712_134531/camera.json" \
@@ -112,7 +114,7 @@ curl -s -X POST "http://127.0.0.1:8000/api/v1/infer/grasp" \
   -o /tmp/grasp_resp.json
 
 # 或短路径
-curl -s -X POST "http://127.0.0.1:8000/infer/grasp" \
+curl -s -X POST "http://127.0.0.1:19000/infer/grasp" \
   -F "rgb=@rgb.png" -F "depth=@depth.png" -F "camera=@camera.json"
 ```
 

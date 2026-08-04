@@ -1,6 +1,6 @@
 # 抓取 位姿估计 Tab：标记位 P1 → 抓取点 q
 
-对应 Gradio 页签 **「抓取 位姿估计」**（入口：`bash start.sh` → `http://<host>:8000/ui`）。
+对应 Gradio 页签 **「抓取 位姿估计」**（入口：`bash start.sh` → `http://<host>:19000/ui`）。
 
 用于在**传感器深度**上做实例分割与标记位几何，选出最靠近标记位的抓取候选点 `q`，并以 `[x, y, z, rx, ry, rz]` 输出夹爪位姿。
 
@@ -11,7 +11,7 @@
 与 UI「抓取 位姿估计」同源：
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/infer/grasp" \
+curl -X POST "http://127.0.0.1:19000/api/v1/infer/grasp" \
   -F "rgb=@rgb.png" -F "depth=@depth.png" -F "camera=@camera.json"
 ```
 

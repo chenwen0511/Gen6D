@@ -13,7 +13,7 @@ import torch
 from depth_anything_3.api import DepthAnything3
 from PIL import Image, ImageDraw
 
-from src.depth.pointcloud import build_pointcloud_files
+from src.depth.pointcloud import build_pointcloud_files, resolve_rgb_shift_xy
 from src.fusion import fuse_sensor_and_estimated
 from src.fusion.types import FusionResult
 from src.storage.upload_archive import DEFAULT_SESSION_DIR, archive_session
@@ -24,8 +24,26 @@ DEFAULT_OUTPUT_DIR = Path("/home/ubuntu/stephen/01-code/Gen6D/outputs/pointcloud
 DEFAULT_MAX_POINTS = 50_000
 
 
-def load_intrinsics_from_dict(data: dict) -> np.ndarray | None:
-    cam_k = data.get("cam_K")
+def normalize_camera_json(data: object) -> dict:
+    """
+    统一 camera.json：支持 ``{"cam_K":[...],"depth_scale":...}``，
+    或直接 9 元 / 3×3 数组（视为 cam_K）。
+    """
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, (list, tuple)):
+        flat = np.asarray(data, dtype=np.float64).reshape(-1)
+        if flat.size == 9:
+            return {"cam_K": flat.tolist(), "depth_scale": 1.0}
+        raise ValueError(f"camera.json 数组长度应为 9，当前 {flat.size}")
+    raise ValueError(f"camera.json 应为对象或 9 元数组，当前类型 {type(data).__name__}")
+
+
+def load_intrinsics_from_dict(data: dict | list | tuple | None) -> np.ndarray | None:
+    if data is None:
+        return None
+    payload = normalize_camera_json(data)
+    cam_k = payload.get("cam_K")
     if cam_k is None:
         return None
     return np.array(cam_k, dtype=np.float32).reshape(3, 3)
@@ -200,6 +218,7 @@ class DepthResult:
     sensor_pointcloud_ply: Path | None = None
     sensor_point_count: int | None = None
     session_dir: Path | None = None
+    rgb_shift: dict | None = None
 
     def to_summary(self) -> dict:
         summary = {
@@ -220,6 +239,8 @@ class DepthResult:
             summary["point_count"] = self.point_count
         if self.sensor_point_count is not None:
             summary["sensor_point_count"] = self.sensor_point_count
+        if self.rgb_shift is not None:
+            summary["rgb_shift"] = self.rgb_shift
         return summary
 
 
@@ -269,10 +290,20 @@ class DepthService:
         rgb_bytes: bytes | None = None,
         rgb_suffix: str = ".png",
         save_session: bool | None = None,
+        rgb_shift_x: float | int | None = None,
+        rgb_shift_y: float | int | None = None,
     ) -> DepthResult:
         rgb_input = str(rgb) if isinstance(rgb, (str, Path)) else rgb
         rgb_image = Image.open(rgb_input).convert("RGB") if isinstance(rgb_input, str) else rgb_input.convert("RGB")
         rgb_array = np.array(rgb_image)
+
+        sx, sy, shift_src = resolve_rgb_shift_xy(
+            rgb_shift_x,
+            rgb_shift_y,
+            intrinsics_data if isinstance(intrinsics_data, dict) else None,
+        )
+        rgb_shift_meta = {"dx": sx, "dy": sy, "source": shift_src}
+        rgb_shift_xy = (sx, sy)
 
         intrinsics_batch = intrinsics[None] if intrinsics is not None else None
         prediction = self.model.inference(
@@ -355,6 +386,7 @@ class DepthService:
                 max_points=self.max_points,
                 conf=pc_conf,
                 stem=f"{pc_stem}_fused" if fusion_result is not None else pc_stem,
+                rgb_shift_xy=rgb_shift_xy,
             )
             pointcloud_glb = pc_info["glb_path"]
             pointcloud_ply = pc_info["ply_path"]
@@ -369,6 +401,7 @@ class DepthService:
                     max_points=self.max_points,
                     conf=None,
                     stem=f"{pc_stem}_sensor",
+                    rgb_shift_xy=rgb_shift_xy,
                 )
                 sensor_pointcloud_glb = sensor_pc_info["glb_path"]
                 sensor_pointcloud_ply = sensor_pc_info["ply_path"]
@@ -396,6 +429,7 @@ class DepthService:
             sensor_pointcloud_glb=sensor_pointcloud_glb,
             sensor_pointcloud_ply=sensor_pointcloud_ply,
             sensor_point_count=sensor_point_count,
+            rgb_shift=rgb_shift_meta,
         )
 
         should_archive = self.save_uploads if save_session is None else save_session

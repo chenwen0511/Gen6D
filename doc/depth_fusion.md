@@ -96,10 +96,10 @@ DA3 推理后深度分辨率为处理分辨率（如 504×378），融合前需 
   ③ Scale & Shift 对齐 → D_metric_est
        │
        ▼
-  ④ 掩码替换融合 → D_fused_raw
+  ④ 掩码硬替换 → D_fused（默认；边界混合 / 引导滤波默认关闭）
        │
        ▼
-  ⑤ 引导滤波平滑边界 → D_fused
+  ⑤（可选）边界混合 / 引导滤波平滑
        │
        ▼
   ⑥ 点云生成 / 下游位姿
@@ -185,13 +185,15 @@ D_fused_raw = where(M_valid, D_sensor, D_metric_est)
 | `M_valid == True` | **保留** `D_sensor`（物理锚点） |
 | `M_valid == False` | **填入** `D_metric_est`（几何补全） |
 
-**边界过渡带**（可选）：
+**边界过渡带**（可选，`enable_boundary_blend`，**默认关闭**）：
 - 对 `M_valid` 腐蚀/膨胀得到边界带 `M_boundary`
-- 在边界带内做加权混合，避免硬切换：
+- 在边界带内做加权混合；易在轮廓产生双影/光晕，位姿场景不建议开：
 
 ```
 D = α · D_sensor + (1-α) · D_metric_est,   α ∈ [0,1]
 ```
+
+**最简可靠用法**：位姿估计直接选 UI/配置里的 **传感器深度**（`depth_source=sensor`），跳过 DA3 融合；融合仅在需要补黑洞可视化时使用。
 
 ---
 
@@ -222,6 +224,8 @@ X = (u - cx) · Z / fx
 Y = (v - cy) · Z / fy
 Z = D_fused
 ```
+
+**点云 RGB 偏移**（仅上色，不改几何）：默认 `rgb_shift = [-45, 0]`，与 graspnet SAM3+GraspNet 一致。可在 UI 调整，或在 `camera.json` 写 `rgb_shift` / `color_shift`。
 
 **验证指标**（Phase 3.6）：
 

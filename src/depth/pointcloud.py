@@ -10,8 +10,14 @@ import numpy as np
 import trimesh
 from PIL import Image
 
+try:
+    import cv2
+except ImportError:  # pragma: no cover
+    cv2 = None
+
 
 DEFAULT_MAX_POINTS = 50_000
+DEFAULT_RGB_SHIFT_XY = (-45, 0)
 CAMERA_TO_GLB = np.diag([1.0, -1.0, 1.0]).astype(np.float64)
 _POSE_AXIS_COLORS = (
     [255, 64, 64, 255],
@@ -44,6 +50,67 @@ def scale_intrinsics(
     k[1, 1] *= sy
     k[1, 2] *= sy
     return k
+
+
+def shift_rgb_xy(
+    rgb: np.ndarray,
+    dx: int,
+    dy: int = 0,
+) -> np.ndarray:
+    """
+    平移 RGB 内容用于点云上色。``dx>0`` 向右（图像 +X），``dy>0`` 向下。
+
+    与 graspnet-baseline 一致：只影响上色，不改深度几何。
+    """
+    img = np.asarray(rgb)
+    dx_i, dy_i = int(dx), int(dy)
+    if dx_i == 0 and dy_i == 0:
+        return img
+    h, w = img.shape[:2]
+    if cv2 is not None:
+        M = np.float32([[1.0, 0.0, float(dx_i)], [0.0, 1.0, float(dy_i)]])
+        border = 0 if img.ndim == 2 else (0, 0, 0)
+        out = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR, borderValue=border)
+        return out.astype(img.dtype, copy=False)
+
+    # 无 OpenCV 时用切片平移（边界填 0）
+    out = np.zeros_like(img)
+    x0_src = max(0, -dx_i)
+    x1_src = min(w, w - dx_i)
+    y0_src = max(0, -dy_i)
+    y1_src = min(h, h - dy_i)
+    x0_dst = max(0, dx_i)
+    y0_dst = max(0, dy_i)
+    if x1_src > x0_src and y1_src > y0_src:
+        out[y0_dst : y0_dst + (y1_src - y0_src), x0_dst : x0_dst + (x1_src - x0_src)] = img[
+            y0_src:y1_src, x0_src:x1_src
+        ]
+    return out
+
+
+def resolve_rgb_shift_xy(
+    rgb_shift_x: float | int | None = None,
+    rgb_shift_y: float | int | None = None,
+    intrinsics_data: dict | None = None,
+    *,
+    default: tuple[int, int] = DEFAULT_RGB_SHIFT_XY,
+) -> tuple[int, int, str]:
+    """
+    解析点云上色 RGB 平移。优先 camera.json 的 ``rgb_shift`` / ``color_shift``，否则用 UI 值。
+    返回 (dx, dy, source)。
+    """
+    meta = intrinsics_data if isinstance(intrinsics_data, dict) else None
+    if meta is not None:
+        cam_shift = meta.get("rgb_shift") or meta.get("color_shift")
+        if isinstance(cam_shift, (list, tuple)) and len(cam_shift) >= 1:
+            dx = int(round(float(cam_shift[0])))
+            dy = int(round(float(cam_shift[1]))) if len(cam_shift) > 1 else 0
+            return dx, dy, "camera.json"
+    if rgb_shift_x is None and rgb_shift_y is None:
+        return int(default[0]), int(default[1]), "default"
+    dx = int(round(float(rgb_shift_x if rgb_shift_x is not None else default[0])))
+    dy = int(round(float(rgb_shift_y if rgb_shift_y is not None else default[1])))
+    return dx, dy, "ui"
 
 
 def depth_rgb_to_pointcloud(
@@ -245,10 +312,16 @@ def build_pointcloud_files(
     max_points: int = DEFAULT_MAX_POINTS,
     conf: np.ndarray | None = None,
     stem: str | None = None,
+    rgb_shift_xy: tuple[int, int] | None = None,
 ) -> dict:
+    color_rgb = rgb
+    if rgb_shift_xy is not None:
+        dx, dy = int(rgb_shift_xy[0]), int(rgb_shift_xy[1]) if len(rgb_shift_xy) > 1 else 0
+        if dx != 0 or dy != 0:
+            color_rgb = shift_rgb_xy(rgb, dx, dy)
     points, colors = depth_rgb_to_pointcloud(
         depth=depth,
-        rgb=rgb,
+        rgb=color_rgb,
         intrinsics=intrinsics,
         max_points=max_points,
         conf=conf,
