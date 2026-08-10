@@ -2,9 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON="${GEN6D_PYTHON:-/home/ubuntu/stephen/05-venv/gen6d/bin/python}"
 LOG_DIR="${ROOT_DIR}/logs"
 PID_DIR="${ROOT_DIR}/.pids"
+CONDA_ENV_NAME="${GEN6D_CONDA_ENV:-gen6d}"
+PYTHON=""
 
 API_HOST="${API_HOST:-0.0.0.0}"
 API_PORT="${API_PORT:-19000}"
@@ -12,7 +13,45 @@ MODEL_DIR="${MODEL_DIR:-/home/ubuntu/stephen/02-weight/depth-anything/DA3-SMALL}
 DEVICE="${DEVICE:-cuda}"
 STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-180}"
 
+# ~/.local 里的旧 nvidia-nccl-cu12 会抢先加载，导致
+# libtorch_cuda.so: undefined symbol: ncclCommResume
+# conda activate 的 activate.d 也会设置；这里再强制一层，确保 nohup 子进程继承。
+export PYTHONNOUSERSITE=1
+
 mkdir -p "${LOG_DIR}" "${PID_DIR}"
+
+activate_gen6d() {
+    if [[ -n "${GEN6D_PYTHON:-}" ]]; then
+        PYTHON="${GEN6D_PYTHON}"
+        return
+    fi
+
+    local conda_base=""
+    if [[ -n "${CONDA_EXE:-}" ]]; then
+        conda_base="$(cd "$(dirname "${CONDA_EXE}")/.." && pwd)"
+    elif command -v conda >/dev/null 2>&1; then
+        conda_base="$(conda info --base 2>/dev/null || true)"
+    fi
+    if [[ -z "${conda_base}" ]]; then
+        local candidate
+        for candidate in /home/ubuntu/miniconda3 "${HOME}/miniconda3" "${HOME}/anaconda3"; do
+            if [[ -f "${candidate}/etc/profile.d/conda.sh" ]]; then
+                conda_base="${candidate}"
+                break
+            fi
+        done
+    fi
+    if [[ -z "${conda_base}" || ! -f "${conda_base}/etc/profile.d/conda.sh" ]]; then
+        echo "conda not found. Install miniconda or set GEN6D_PYTHON=/path/to/python"
+        exit 1
+    fi
+
+    # shellcheck disable=SC1091
+    source "${conda_base}/etc/profile.d/conda.sh"
+    conda activate "${CONDA_ENV_NAME}"
+    PYTHON="$(command -v python)"
+    echo "[env] conda activate ${CONDA_ENV_NAME} -> ${PYTHON}"
+}
 
 get_lan_ip() {
     hostname -I 2>/dev/null | awk '{print $1}'
@@ -95,9 +134,10 @@ stop_service() {
 start_all() {
     cd "${ROOT_DIR}"
 
+    activate_gen6d
     if [[ ! -x "${PYTHON}" ]]; then
         echo "Python not found: ${PYTHON}"
-        echo "Set GEN6D_PYTHON or activate gen6d environment first."
+        echo "Set GEN6D_PYTHON or ensure conda env '${CONDA_ENV_NAME}' exists."
         exit 1
     fi
 
