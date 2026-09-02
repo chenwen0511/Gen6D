@@ -57,7 +57,11 @@ RGB + 传感器深度 + camera.json
             以 p_i 为球心、半径 8 mm 内的点
                   │
                   ▼
-            相机系 |y − p_i.y| ≤ 2 mm ──► q_i（xy 均值，z = p_i.z）
+            相机系 |y − p_i.y| ≤ 2 mm ──► q_i（xy 均值）
+                  │
+                  ▼
+            有 P1 时：q.z = P1.z − 30mm（沿相机 Z 往后退；
+            配置 grasp.z_offset_from_p1_mm，默认 -30）
                   │
                   ▼
             有 P1 时：按沿 P1 局部 X 的 |((q−P1)·X)| 排序
@@ -109,6 +113,10 @@ RGB + 传感器深度 + camera.json
     "p_i_mm": [...],
     "q_i_mm": [...],
     "x_dist_mm": 22.05,
+    "z_from": "p1_z_plus_offset",
+    "p1_z_mm": 395.5,
+    "z_offset_from_p1_mm": -30.0,
+    "q_i_z_raw_mm": 360.0,
     "role": "gripper_grasp_point"
   }
 }
@@ -120,7 +128,7 @@ RGB + 传感器深度 + camera.json
 - 黄球 / 短轴：P1
 - 彩色球 + RGB 轴：最终 q（姿态取自 P1；已烧进点云以便 Model3D 可见）
 
-详情 JSON 字段：`instance_qi` / `instance_qi_all`（含 `p_i_mm`、`q_i_mm`、`radius_mm`、`y_band_mm`、`num_sphere` / `num_band` 等）。
+详情 JSON 字段：`instance_qi` / `instance_qi_all`（含 `p_i_mm`、`q_i_mm`、`q_i_z_raw_mm`、`p1_z_mm`、`z_offset_from_p1_mm`、`radius_mm`、`y_band_mm`、`num_sphere` / `num_band` 等）。
 
 ---
 
@@ -130,7 +138,7 @@ RGB + 传感器深度 + camera.json
 |------|------|
 | **P1** | 货架面板蓝色 LED 标记位中心位姿（各孔 8 点联合定面板朝向 Z，孔心 3D 双平行线定水平 X，LED 定中心/深度） |
 | **p_i** | 实例 i 剔除外点后，相机系 **Z 最小**点 |
-| **q_i** | 球 **8 mm** + 相机 **y±2 mm** 筛点后，**xy 取均值、z 取 p_i.z**（UI 展示用） |
+| **q_i** | 球 **8 mm** + 相机 **y±2 mm** 筛点后 **xy 取均值**；有 P1 时 **z = P1.z − 30mm**（往后退，配置 `grasp.z_offset_from_p1_mm`） |
 | **p_ix** | 实例内沿 **P1 局部 X** 距 P1 最近的点（对照路径） |
 | **q** | 全部 q_i 中沿 P1-X `|dx|` **最近**的那一个 → 夹爪抓取点 |
 
@@ -143,10 +151,10 @@ RGB + 传感器深度 + camera.json
 | `src/grasp/sam3_tab.py` | Tab UI、推理编排、抓取 JSON |
 | `src/grasp/marker.py` | 标记筛选、P1 可视化、2D 点预览 |
 | `src/grasp/place_geometry.py` | 标记几何 / 反投影 / 姿态（移植自 PEM） |
-| `src/depth/pointcloud.py` | 实例点云、`find_instance_qi_from_pi_sphere`、P1-X 筛选 |
+| `src/depth/pointcloud.py` | 实例点云、`find_instance_qi_from_pi_sphere`、`apply_qi_z_from_p1`、P1-X 筛选 |
 | `src/grasp/sam3.py` | SAM3 客户端、`render_sam3_mask_bbox_previews` |
 | `prompt/shelf_holes.txt` / `prompt/blue_led_marker.txt` | 默认孔洞 / LED 提示词 |
-| `config/grasp_config.json` | `sam3` / `place` / `pem` 默认配置 |
+| `config/grasp_config.json` | `sam3` / `grasp` / `place` / `pem` 默认配置 |
 
 ---
 

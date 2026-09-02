@@ -758,6 +758,39 @@ def find_instance_qi_from_pi_y_band(
     )
 
 
+def apply_qi_z_from_p1(
+    items: list[dict],
+    p1_z_mm: float,
+    z_offset_mm: float = -30.0,
+) -> list[dict]:
+    """
+    抓取点相机系 Z 改为 ``P1.z + z_offset_mm``，xy 保持 q_i 原值。
+
+    默认 ``z_offset_mm=-30``：相对 P1 沿相机 Z **往后退 30mm**（靠近相机）。
+    """
+    z = round(float(p1_z_mm) + float(z_offset_mm), 2)
+    out: list[dict] = []
+    for item in items:
+        row = dict(item)
+        pos = [float(v) for v in (row.get("position_mm") or [0.0, 0.0, 0.0])]
+        qi = [float(v) for v in (row.get("q_i_mm") or pos)]
+        while len(pos) < 3:
+            pos.append(0.0)
+        while len(qi) < 3:
+            qi.append(pos[2] if len(pos) > 2 else 0.0)
+        row["q_i_z_raw_mm"] = round(float(qi[2]), 2)
+        pos[2] = z
+        qi[2] = z
+        row["position_mm"] = [round(pos[0], 2), round(pos[1], 2), z]
+        row["q_i_mm"] = [round(qi[0], 2), round(qi[1], 2), z]
+        row["z_mm"] = z
+        row["z_from"] = "p1_z_plus_offset"
+        row["p1_z_mm"] = round(float(p1_z_mm), 2)
+        row["z_offset_from_p1_mm"] = float(z_offset_mm)
+        out.append(row)
+    return out
+
+
 # 兼容旧名
 find_instance_max_z_points = find_instance_min_z_points
 

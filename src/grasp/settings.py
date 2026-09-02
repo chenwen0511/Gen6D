@@ -112,6 +112,13 @@ SAM6D_DEPTH_SOURCE = _env_str(
     default=_cfg_str(_pem, "depth_source", "fused"),
 )
 
+_grasp = _section("grasp")
+GRASP_Z_OFFSET_FROM_P1_MM = _env_float(
+    "GENPOSE2_GRASP_Z_OFFSET_FROM_P1_MM",
+    "GRASP_Z_OFFSET_FROM_P1_MM",
+    default=_cfg_float(_grasp, "z_offset_from_p1_mm", -30.0),
+)
+
 _place = _section("place")
 _default_hole_prompt = (
     "All small circular through holes on the gray flat metal shelf panel in horizontal"
@@ -175,6 +182,7 @@ DEFAULT_SAM6D_SEG_BACKEND = SAM6D_SEG_BACKEND
 DEFAULT_SAM6D_SEGMENTOR_MODEL = SAM6D_SEGMENTOR_MODEL
 DEFAULT_SAM6D_DET_SCORE_THRESH = SAM6D_DET_SCORE_THRESH
 DEFAULT_SAM6D_DEPTH_SOURCE = SAM6D_DEPTH_SOURCE
+DEFAULT_GRASP_Z_OFFSET_FROM_P1_MM = GRASP_Z_OFFSET_FROM_P1_MM
 DEFAULT_PLACE_HOLE_PROMPT = PLACE_HOLE_PROMPT
 DEFAULT_PLACE_LED_PROMPT = PLACE_LED_PROMPT
 DEFAULT_PLACE_MARKER_PROMPT = PLACE_MARKER_PROMPT

@@ -1,6 +1,6 @@
 # 抓取点 REST API：`/api/v1/infer/grasp`
 
-与 Gradio **「抓取 位姿估计」** 页签同逻辑：实例分割 → 货架孔洞（双平行线定 X + 8 点联合定 Z）+ 蓝色 LED 定 **P1** → `q_i`（球 8mm → y±2mm，xy 均值 + z=p_i.z）→ 沿 P1-X 取最近的抓取点 `q`。
+与 Gradio **「抓取 位姿估计」** 页签同逻辑：实例分割 → 货架孔洞（双平行线定 X + 8 点联合定 Z）+ 蓝色 LED 定 **P1** → `q_i`（球 8mm → y±2mm，xy 均值；有 P1 时 **z = P1.z − 30mm**）→ 沿 P1-X 取最近的抓取点 `q`。
 
 算法细节见 [sam3_seg_tab.md](sam3_seg_tab.md)。
 

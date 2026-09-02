@@ -25,6 +25,9 @@
     "det_score_thresh": 0.3,
     "depth_source": "sensor"
   },
+  "grasp": {
+    "z_offset_from_p1_mm": -30
+  },
   "place": {
     "hole_prompt": "All small circular through holes on the gray flat metal shelf panel in horizontal",
     "led_prompt": "Small glowing circular blue LED indicator light on the gray metal shelf plate",

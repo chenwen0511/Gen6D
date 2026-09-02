@@ -13,6 +13,7 @@ from PIL import Image
 
 from src.depth.pointcloud import (
     annotate_p1_x_distance,
+    apply_qi_z_from_p1,
     find_instance_qi_from_pi_sphere,
     select_nearest_along_p1_x,
 )
@@ -37,6 +38,7 @@ from src.grasp.sam3 import (
     render_sam3_mask_bbox_previews,
 )
 from src.grasp.settings import (
+    DEFAULT_GRASP_Z_OFFSET_FROM_P1_MM,
     DEFAULT_PLACE_HOLE_PROMPT,
     DEFAULT_PLACE_LED_PROMPT,
     DEFAULT_PLACE_MARKER_PROMPT,
@@ -148,12 +150,14 @@ def infer_grasp(
     timeout_s: Optional[float] = None,
     radius_mm: float = 8.0,
     y_band_mm: float = 2.0,
+    z_offset_from_p1_mm: Optional[float] = None,
 ) -> GraspInferResult:
     """
     与「抓取 位姿估计」页签同款流水线：实例分割 → P1 → q_i → 沿 P1-X 最近 q。
 
     :param sensor_depth: 传感器深度，单位 mm，形状 (H, W)
     :param intrinsics: 3×3 cam_K
+    :param z_offset_from_p1_mm: 有 P1 时 q.z = P1.z + 该值；默认 -30（往后退 30mm）
     """
     t0 = time.perf_counter()
     prompt_text = (prompt or DEFAULT_SAM3_PROMPT or "").strip()
@@ -272,8 +276,14 @@ def infer_grasp(
         radius_mm=float(radius_mm),
         y_band_mm=float(y_band_mm),
     )
+    z_off = (
+        float(DEFAULT_GRASP_Z_OFFSET_FROM_P1_MM)
+        if z_offset_from_p1_mm is None
+        else float(z_offset_from_p1_mm)
+    )
     rotation_src = p1_pose.rotation if p1_pose is not None else np.eye(3, dtype=np.float64)
     if p1_pose is not None and qi_all:
+        qi_all = apply_qi_z_from_p1(qi_all, float(p1_pose.position_mm[2]), z_off)
         qi_all = annotate_p1_x_distance(qi_all, p1_pose.position_mm, p1_pose.rotation)
         qi_list = select_nearest_along_p1_x(qi_all)
     else:
@@ -329,6 +339,10 @@ def infer_grasp(
             "radius_mm": q.get("radius_mm"),
             "y_band_mm": q.get("y_band_mm"),
             "rotation_from": q.get("rotation_from"),
+            "z_from": q.get("z_from", "p_i"),
+            "p1_z_mm": q.get("p1_z_mm"),
+            "z_offset_from_p1_mm": q.get("z_offset_from_p1_mm"),
+            "q_i_z_raw_mm": q.get("q_i_z_raw_mm"),
             "role": "gripper_grasp_point",
         },
     )
@@ -356,6 +370,7 @@ def infer_grasp(
             "mask_threshold": mask_thr,
             "radius_mm": float(radius_mm),
             "y_band_mm": float(y_band_mm),
+            "z_offset_from_p1_mm": z_off if p1_pose is not None else None,
             "detections": _detection_summary(detections),
         },
     )

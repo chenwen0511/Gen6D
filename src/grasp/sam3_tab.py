@@ -17,6 +17,7 @@ from PIL import Image
 
 from src.depth.pointcloud import (
     annotate_p1_x_distance,
+    apply_qi_z_from_p1,
     camera_pose_mm_to_glb,
     create_pose_axes_mesh,
     create_pose_marker_sphere,
@@ -55,6 +56,7 @@ from src.grasp.sam3 import (
     render_sam3_mask_bbox_previews,
 )
 from src.grasp.settings import (
+    DEFAULT_GRASP_Z_OFFSET_FROM_P1_MM,
     DEFAULT_PLACE_HOLE_PROMPT,
     DEFAULT_PLACE_LED_PROMPT,
     DEFAULT_PLACE_MARKER_PROMPT,
@@ -168,13 +170,16 @@ def _build_scene_with_optional_p1(
         max_points=depth_service.max_points,
     )
 
-    # p_i → 球半径 8mm → 相机 y±2mm 聚合得 q_i；UI / 点云展示用 q_i
+    # p_i → 球半径 8mm → 相机 y±2mm 聚合得 q_i；有 P1 时 z = P1.z - 30mm
     qi_all = find_instance_qi_from_pi_sphere(
         sensor_depth, id_map, intrinsics, radius_mm=8.0, y_band_mm=2.0
     )
     rotation_src = p1_pose.rotation if p1_pose is not None else np.eye(3, dtype=np.float64)
 
     if p1_pose is not None and qi_all:
+        qi_all = apply_qi_z_from_p1(
+            qi_all, float(p1_pose.position_mm[2]), float(DEFAULT_GRASP_Z_OFFSET_FROM_P1_MM)
+        )
         qi_all = annotate_p1_x_distance(qi_all, p1_pose.position_mm, p1_pose.rotation)
         qi_list = select_nearest_along_p1_x(qi_all)
     else:
@@ -281,10 +286,11 @@ def _build_scene_with_optional_p1(
         "pi_count": len(qi_list),
         "pi_candidate_count": len(qi_all),
         "pi_note": (
-            "各实例：p_i=剔除外点后 Z 最小 → 球半径 8mm → 相机 y±2mm → q_i(xy 均值, z=p_i.z)；"
-            "有 P1 时再按 q_i 的 P1-X |dx| 只保留最近 1 个用于显示；"
+            "各实例：p_i=剔除外点后 Z 最小 → 球半径 8mm → 相机 y±2mm → q_i(xy 均值)；"
+            "有 P1 时 q.z = P1.z + z_offset_from_p1_mm（默认 -30mm，往后退）；"
+            "再按 q_i 的 P1-X |dx| 只保留最近 1 个用于显示；"
             "数值 frame=camera；3D 预览 preview_frame=glb_y_up（Y 翻转）；"
-            "JSON 含 p_i_mm / q_i_mm，候选见 instance_qi_all"
+            "JSON 含 p_i_mm / q_i_mm / q_i_z_raw_mm，候选见 instance_qi_all"
         ),
     }
 
@@ -538,6 +544,10 @@ def run_sam3_seg_tab_inference(
                 "radius_mm": q.get("radius_mm"),
                 "y_band_mm": q.get("y_band_mm"),
                 "rotation_from": q.get("rotation_from", "p1" if p1_pose is not None else "identity"),
+                "z_from": q.get("z_from", "p_i"),
+                "p1_z_mm": q.get("p1_z_mm"),
+                "z_offset_from_p1_mm": q.get("z_offset_from_p1_mm"),
+                "q_i_z_raw_mm": q.get("q_i_z_raw_mm"),
                 "role": "gripper_grasp_point",
             },
         )
@@ -670,7 +680,7 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                 )
                 out_pi = gr.Image(
                     type="pil",
-                    label="P1 + 最近 q_i（球 8mm + y±2mm；按 P1-X 仅 1 个）",
+                    label="P1 + 最近 q_i（xy 来自球筛；z=P1.z−30mm；按 P1-X 仅 1 个）",
                     height=240,
                 )
                 out_pix = gr.Image(
@@ -682,8 +692,9 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
         gr.Markdown("### 3D 点云（传感器深度 · 实例分色 · P1 / q_i 坐标轴）")
         gr.Markdown(
             "> **灰色**=背景；**彩色**=各 SAM3 实例；"
-            "每实例先求 **p_i（Z 最小）**，再 **球半径 8mm** 后 **相机 y±2mm** 得 **q_i**（xy 均值，z=p_i.z）；"
-            "有 P1 时再按 q_i 的 P1-X |dx| **只保留最近 1 个**。"
+            "每实例先求 **p_i（Z 最小）**，再 **球半径 8mm** 后 **相机 y±2mm** 得 **q_i**（xy 均值）；"
+            "有 P1 时 **q.z = P1.z − 30mm**（沿相机 Z 往后退）；"
+            "再按 q_i 的 P1-X |dx| **只保留最近 1 个**。"
             "黄球/短轴 = 标记 P1。"
             "**数值坐标系 `frame=camera`（X右 Y下 Z前）**；"
             "**3D 预览 `preview_frame=glb_y_up`（点云与坐标轴均 Y 翻转后显示）**。"
@@ -745,8 +756,8 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
               4. **ABCD/abcd 放大图**：单独裁剪 LED 外接正方形区域，标注两组角点与各角深度
               5. P1 预览可画出上下两排孔拟合线（`holes H/top` / `holes H/bottom`）
             - **抓取点 q**：最终保留的 q_i；左侧 JSON 的 `xyzrxryrz = [x,y,z,rx,ry,rz]`（xyz=mm，姿态=°，ZYX）
-            - **实例 q_i**：先求 **p_i（Z 最小）** → **球 8mm** → **相机 y±2mm** → **q_i**（筛选点 **xy 均值**，**z 取 p_i.z**）
-              → 有 P1 时再按 **P1-X |dx|** **只显示最近的 1 个**
+            - **实例 q_i**：先求 **p_i（Z 最小）** → **球 8mm** → **相机 y±2mm** → **q_i**（筛选点 **xy 均值**）；
+              有 P1 时 **z = P1.z − 30mm**（往后退），再按 **P1-X |dx|** **只显示最近的 1 个**
             - **实例 p_ix**：各实例沿 P1-X 最近点后，再按 **|dx|** 排序，**只显示最近的 1 个**
             - **快速预览**：q_i / p_ix 图均只画选出的那一个点；候选在 JSON `instance_qi_all` / `instance_pi_x_all`
             - 点云仅用 **原始传感器深度**；3D 标记为 **q_i**（彩色密集球 + RGB 三色射线）
