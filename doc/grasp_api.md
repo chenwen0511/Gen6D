@@ -93,7 +93,7 @@ Base：`http://<host>:19000`（与 UI 同进程，`bash start.sh`；可用 `API_
 
 | 字段 | 说明 |
 |------|------|
-| `xyzrxryrz` | **抓取点**：`[x,y,z,rx,ry,rz]`，xyz=**mm**，角度=**°**；**相机系** |
+| `xyzrxryrz` | **抓取点**：`[x,y,z,rx,ry,rz]`，xyz=**mm**，角度=**°**；**相机系**。有 P1 时 **z = P1.z − 30mm**（`grasp.z_offset_from_p1_mm`） |
 | `frame` | 数值坐标系：`camera`（X 右、Y 下、Z 前） |
 | `preview_frame` | 3D 预览系：`glb_y_up`（相对相机系 Y 翻转）；`glb_position_mm` 在此系 |
 | `images.grasp_vis` | P1 + 最终 q 的叠加图（与 UI 页签预览一致） |
