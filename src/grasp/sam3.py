@@ -845,6 +845,49 @@ def render_sam3_mask_bbox_previews(
     return mask_vis, bbox_vis
 
 
+def _format_sam3_response_log(api_url: str, status_code: int, body: Any) -> str:
+    """把 SAM3 /infer 返回压成一行日志（不含 base64）。"""
+    if not isinstance(body, dict):
+        return f"response status={status_code} body_type={type(body).__name__}"
+
+    dets = body.get("detections") or []
+    scores: list[float] = []
+    if isinstance(dets, list):
+        for det in dets:
+            if isinstance(det, dict) and det.get("score") is not None:
+                try:
+                    scores.append(round(float(det["score"]), 3))
+                except (TypeError, ValueError):
+                    continue
+        scores = scores[:12]
+
+    parts = [
+        f"response {api_url}",
+        f"status={status_code}",
+        f"ok={body.get('ok')}",
+        f"n={len(dets) if isinstance(dets, list) else 'na'}",
+    ]
+    elapsed = body.get("elapsed_ms")
+    if elapsed is not None:
+        try:
+            parts.append(f"elapsed_ms={float(elapsed):.1f}")
+        except (TypeError, ValueError):
+            pass
+    for key in ("role", "model", "model_name"):
+        value = body.get(key)
+        if value:
+            parts.append(f"{key}={value}")
+            break
+    if scores:
+        parts.append(f"scores={scores}")
+    err = body.get("error")
+    if err:
+        parts.append(f"error={err}")
+    if body.get("visualization_base64"):
+        parts.append("has_vis=1")
+    return " ".join(str(p) for p in parts)
+
+
 def infer_sam3_with_image(
     image: Image.Image,
     *,
@@ -899,7 +942,13 @@ def infer_sam3_with_image(
     try:
         body = resp.json()
     except ValueError:
+        print(
+            f"[sam3_seg] response status={resp.status_code} invalid_json "
+            f"body={resp.text[:300]!r}"
+        )
         raise RuntimeError(f"SAM3 invalid JSON response: status={resp.status_code} body={resp.text[:500]}")
+
+    print(f"[sam3_seg] {_format_sam3_response_log(api_url, resp.status_code, body)}")
 
     if resp.status_code != 200 or not body.get("ok", False):
         err = body.get("error") if isinstance(body, dict) else resp.text[:500]

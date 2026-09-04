@@ -60,6 +60,7 @@ from src.grasp.settings import (
     DEFAULT_PLACE_HOLE_PROMPT,
     DEFAULT_PLACE_LED_PROMPT,
     DEFAULT_PLACE_MARKER_PROMPT,
+    DEFAULT_PLACE_SAM3_API_URL,
     DEFAULT_PLACE_SAM3_MASK_THRESHOLD,
     DEFAULT_PLACE_SAM3_THRESHOLD,
     DEFAULT_PLACE_SAM3_TIMEOUT_S,
@@ -305,7 +306,9 @@ def run_sam3_seg_tab_inference(
     led_prompt: str,
     enable_marker_p1: bool,
     api_url: str,
+    marker_api_url: str,
     threshold: float,
+    marker_threshold: float,
     mask_threshold: float,
     timeout_s: float,
 ) -> Sam3TabOutputs:
@@ -352,6 +355,7 @@ def run_sam3_seg_tab_inference(
         image_for_seg = image.convert("RGB")
 
     sam_api = (api_url or "").strip() or DEFAULT_SAM3_API_URL
+    marker_api = (marker_api_url or "").strip() or DEFAULT_PLACE_SAM3_API_URL
     t0 = time.perf_counter()
 
     # --- 1) 实例分割（用户提示词）---
@@ -422,6 +426,7 @@ def run_sam3_seg_tab_inference(
         led_prompt_text = (led_prompt or load_led_prompt() or DEFAULT_PLACE_LED_PROMPT).strip()
         marker_payload["hole_prompt"] = hole_prompt_text
         marker_payload["led_prompt"] = led_prompt_text
+        marker_payload["sam3_api"] = marker_api
         try:
             p1_pose, marker_payload, p1_vis, abcd_zoom = infer_p1_from_shelf_panel(
                 image_for_seg,
@@ -430,8 +435,12 @@ def run_sam3_seg_tab_inference(
                 (depth_w, depth_h),
                 hole_prompt=hole_prompt_text,
                 led_prompt=led_prompt_text,
-                api_url=sam_api,
-                threshold=float(threshold if threshold is not None else DEFAULT_PLACE_SAM3_THRESHOLD),
+                api_url=marker_api,
+                threshold=float(
+                    marker_threshold
+                    if marker_threshold is not None
+                    else DEFAULT_PLACE_SAM3_THRESHOLD
+                ),
                 mask_threshold=float(
                     mask_threshold if mask_threshold is not None else DEFAULT_PLACE_SAM3_MASK_THRESHOLD
                 ),
@@ -569,6 +578,7 @@ def run_sam3_seg_tab_inference(
         ),
         "image_size": [depth_w, depth_h],
         "sam3_api": sam_api,
+        "sam3_marker_api": marker_api,
         "instance_prompt": prompt_text,
         "threshold": float(threshold),
         "mask_threshold": float(mask_threshold),
@@ -598,8 +608,8 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
 
     with gr.Tab("抓取 位姿估计"):
         gr.Markdown(
-            "验证 **SAM3 文本分割** + **传感器深度点云**；可选识别 **货架面板孔洞**（定水平）"
-            "与 **蓝色 LED**（定 P1 中心 + 外接正方形四角深度）。"
+            "验证 **SAM3 文本分割** + **传感器深度点云**；"
+            "料盘用 **微调 SAM3**，孔洞 / 蓝色 LED 用 **官方 SAM3**。"
         )
         with gr.Row():
             with gr.Column(scale=1):
@@ -635,13 +645,27 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                     lines=2,
                 )
                 with gr.Accordion("SAM3 推理参数", open=True):
-                    sam3_api = gr.Textbox(label="SAM3 API URL", value=DEFAULT_SAM3_API_URL)
+                    sam3_api = gr.Textbox(
+                        label="料盘 SAM3 API（微调）",
+                        value=DEFAULT_SAM3_API_URL,
+                    )
+                    sam3_marker_api = gr.Textbox(
+                        label="孔洞 / LED SAM3 API（官方）",
+                        value=DEFAULT_PLACE_SAM3_API_URL,
+                    )
                     sam3_threshold = gr.Slider(
-                        label="Threshold",
+                        label="Threshold（料盘 / 微调）",
                         minimum=0.0,
                         maximum=1.0,
                         step=0.01,
                         value=DEFAULT_SAM3_THRESHOLD,
+                    )
+                    sam3_marker_threshold = gr.Slider(
+                        label="Threshold（孔洞 / LED / 官方）",
+                        minimum=0.0,
+                        maximum=1.0,
+                        step=0.01,
+                        value=DEFAULT_PLACE_SAM3_THRESHOLD,
                     )
                     sam3_mask_threshold = gr.Slider(
                         label="Mask Threshold",
@@ -724,7 +748,9 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
                 led_prompt,
                 enable_marker,
                 sam3_api,
+                sam3_marker_api,
                 sam3_threshold,
+                sam3_marker_threshold,
                 sam3_mask_threshold,
                 sam3_timeout,
             ],
@@ -747,8 +773,9 @@ def build_sam3_seg_tab(depth_service: "DepthService") -> None:
         gr.Markdown(
             f"""
             **说明**
-            - 实例分割：SAM3 `POST /infer` + 文本提示，默认 API `{DEFAULT_SAM3_API_URL}`
+            - 实例分割（料盘）：微调 SAM3 `POST /infer`，默认 API `{DEFAULT_SAM3_API_URL}`
               （快速预览拆成 **mask** / **bbox** 两张图）
+            - 孔洞 / LED 标记位：官方 SAM3，默认 API `{DEFAULT_PLACE_SAM3_API_URL}`
             - **标记位 P1**（货架面板）：
               1. 孔洞提示词分割所有圆形通孔 → 孔心反投影到 3D，按 PCA 分上下两排，**双平行线联合 SVD** 得共享方向定 **水平 X**（单排则退化为单线 PCA）
               2. 蓝色 LED 提示词分割发光圆 → **圆心** 为 P1 像素中心

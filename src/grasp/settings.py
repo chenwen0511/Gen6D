@@ -67,7 +67,11 @@ VLM_TEMPERATURE = _env_float("GENPOSE2_VLM_TEMPERATURE", default=_cfg_float(_vlm
 VLM_TIMEOUT_S = _env_float("GENPOSE2_VLM_TIMEOUT_S", default=_cfg_float(_vlm, "timeout_s", 120.0))
 
 _sam3 = _section("sam3")
-SAM3_API_URL = _env_str("GENPOSE2_SAM3_API_URL", "SAM6D_SAM3_API_URL", default=_cfg_str(_sam3, "api_url"))
+SAM3_API_URL = _env_str(
+    "GENPOSE2_SAM3_API_URL",
+    "SAM6D_SAM3_API_URL",
+    default=_cfg_str(_sam3, "api_url", "http://127.0.0.1:18122/infer"),
+)
 SAM3_PROMPT = _env_str("GENPOSE2_SAM3_PROMPT", "SAM6D_SAM3_PROMPT", default=_cfg_str(_sam3, "prompt"))
 SAM3_THRESHOLD = _env_float("GENPOSE2_SAM3_THRESHOLD", default=_cfg_float(_sam3, "threshold", 0.41))
 SAM3_MASK_THRESHOLD = _env_float(
@@ -121,7 +125,7 @@ GRASP_Z_OFFSET_FROM_P1_MM = _env_float(
 
 _place = _section("place")
 _default_hole_prompt = (
-    "All small circular through holes on the gray flat metal shelf panel in horizontal"
+    "Circular mounting holes on the upper gray metal shelf panel"
 )
 _default_led_prompt = (
     "Small glowing circular blue LED indicator light on the gray metal shelf plate"
@@ -141,9 +145,15 @@ PLACE_MARKER_PROMPT = _env_str(
     "PLACE_MARKER_PROMPT",
     default=_cfg_str(_place, "marker_prompt", _default_led_prompt),
 )
+PLACE_SAM3_API_URL = _env_str(
+    "GENPOSE2_PLACE_SAM3_API_URL",
+    "PLACE_SAM3_API_URL",
+    "SAM3_MARKER_API_URL",
+    default=_cfg_str(_place, "sam3_api_url", "http://127.0.0.1:18124/infer"),
+)
 PLACE_SAM3_THRESHOLD = _env_float(
     "GENPOSE2_PLACE_SAM3_THRESHOLD",
-    default=_cfg_float(_place, "sam3_threshold", 0.41),
+    default=_cfg_float(_place, "sam3_threshold", 0.09),
 )
 PLACE_SAM3_MASK_THRESHOLD = _env_float(
     "GENPOSE2_PLACE_SAM3_MASK_THRESHOLD",
@@ -183,6 +193,7 @@ DEFAULT_SAM6D_SEGMENTOR_MODEL = SAM6D_SEGMENTOR_MODEL
 DEFAULT_SAM6D_DET_SCORE_THRESH = SAM6D_DET_SCORE_THRESH
 DEFAULT_SAM6D_DEPTH_SOURCE = SAM6D_DEPTH_SOURCE
 DEFAULT_GRASP_Z_OFFSET_FROM_P1_MM = GRASP_Z_OFFSET_FROM_P1_MM
+DEFAULT_PLACE_SAM3_API_URL = PLACE_SAM3_API_URL
 DEFAULT_PLACE_HOLE_PROMPT = PLACE_HOLE_PROMPT
 DEFAULT_PLACE_LED_PROMPT = PLACE_LED_PROMPT
 DEFAULT_PLACE_MARKER_PROMPT = PLACE_MARKER_PROMPT

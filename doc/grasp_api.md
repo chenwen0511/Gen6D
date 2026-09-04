@@ -27,13 +27,15 @@ Base：`http://<host>:19000`（与 UI 同进程，`bash start.sh`；可用 `API_
 | `depth` | file | 是 | 传感器深度 uint16 PNG（mm） |
 | `camera` | file | 条件 | `camera.json` 文件（与 `camera_json` 二选一） |
 | `camera_json` | string | 条件 | 内参 JSON 字符串（与 `camera` 二选一） |
-| `prompt` | string | 否 | 实例 SAM3 提示词（默认读配置） |
-| `hole_prompt` | string | 否 | 货架面板圆形孔洞 SAM3 提示词（孔心双平行线定水平 X + 联合定面板法向 Z） |
-| `led_prompt` | string | 否 | 蓝色 LED 圆形标记 SAM3 提示词（定 P1 像素中心） |
+| `prompt` | string | 否 | 料盘实例 SAM3 提示词（默认读配置；走微调服务） |
+| `hole_prompt` | string | 否 | 货架孔洞 SAM3 提示词（默认 `Circular mounting holes on the upper gray metal shelf panel`） |
+| `led_prompt` | string | 否 | 蓝色 LED SAM3 提示词（定 P1 像素中心） |
 | `marker_prompt` | string | 否 | 兼容旧字段，等同 `led_prompt` |
 | `enable_marker_p1` | bool | 否 | 是否识别孔洞 + LED 并计算 P1，默认 `true` |
-| `sam3_api_url` | string | 否 | SAM3 服务 URL |
-| `threshold` | float | 否 | SAM3 threshold |
+| `sam3_api_url` | string | 否 | 料盘微调 SAM3 URL，默认 `http://127.0.0.1:18122/infer` |
+| `sam3_marker_api_url` | string | 否 | 孔洞/LED 官方 SAM3 URL，默认 `http://127.0.0.1:18124/infer` |
+| `threshold` | float | 否 | 料盘微调 SAM3 threshold，默认 `0.41` |
+| `sam3_marker_threshold` | float | 否 | 孔洞/LED 官方 SAM3 threshold，默认 `0.09` |
 | `mask_threshold` | float | 否 | SAM3 mask_threshold |
 | `timeout_s` | float | 否 | SAM3 超时（秒） |
 | `radius_mm` | float | 否 | 以 p_i 为球心的初筛半径（mm），默认 `8.0` |

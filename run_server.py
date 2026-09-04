@@ -31,6 +31,8 @@ from src.grasp.settings import (
     DEFAULT_PLACE_HOLE_PROMPT,
     DEFAULT_PLACE_LED_PROMPT,
     DEFAULT_PLACE_MARKER_PROMPT,
+    DEFAULT_PLACE_SAM3_API_URL,
+    DEFAULT_PLACE_SAM3_THRESHOLD,
     DEFAULT_SAM3_API_URL,
     DEFAULT_SAM3_MASK_THRESHOLD,
     DEFAULT_SAM3_PROMPT,
@@ -156,7 +158,9 @@ def create_app(model_dir: str, device: str) -> FastAPI:
         led_prompt: str | None,
         enable_marker_p1: bool,
         sam3_api_url: str | None,
+        sam3_marker_api_url: str | None,
         threshold: float | None,
+        marker_threshold: float | None,
         mask_threshold: float | None,
         timeout_s: float | None,
         radius_mm: float,
@@ -197,7 +201,13 @@ def create_app(model_dir: str, device: str) -> FastAPI:
                 led_prompt=led_prompt or marker_prompt or DEFAULT_PLACE_LED_PROMPT,
                 enable_marker_p1=bool(enable_marker_p1),
                 api_url=sam3_api_url or DEFAULT_SAM3_API_URL,
+                marker_api_url=sam3_marker_api_url or DEFAULT_PLACE_SAM3_API_URL,
                 threshold=threshold if threshold is not None else DEFAULT_SAM3_THRESHOLD,
+                marker_threshold=(
+                    marker_threshold
+                    if marker_threshold is not None
+                    else DEFAULT_PLACE_SAM3_THRESHOLD
+                ),
                 mask_threshold=(
                     mask_threshold if mask_threshold is not None else DEFAULT_SAM3_MASK_THRESHOLD
                 ),
@@ -240,8 +250,14 @@ def create_app(model_dir: str, device: str) -> FastAPI:
         hole_prompt: Annotated[str | None, Form(description="货架面板圆形孔洞 SAM3 提示词")] = None,
         led_prompt: Annotated[str | None, Form(description="蓝色 LED 圆形标记 SAM3 提示词")] = None,
         enable_marker_p1: Annotated[bool, Form(description="是否识别孔洞+LED并计算 P1")] = True,
-        sam3_api_url: Annotated[str | None, Form(description="SAM3 API URL")] = None,
-        threshold: Annotated[float | None, Form(description="SAM3 threshold")] = None,
+        sam3_api_url: Annotated[str | None, Form(description="料盘微调 SAM3 API URL")] = None,
+        sam3_marker_api_url: Annotated[
+            str | None, Form(description="孔洞/LED 官方 SAM3 API URL")
+        ] = None,
+        threshold: Annotated[float | None, Form(description="料盘微调 SAM3 threshold")] = None,
+        sam3_marker_threshold: Annotated[
+            float | None, Form(description="孔洞/LED 官方 SAM3 threshold，默认 0.09")
+        ] = None,
         mask_threshold: Annotated[float | None, Form(description="SAM3 mask_threshold")] = None,
         timeout_s: Annotated[float | None, Form(description="SAM3 超时秒")] = None,
         radius_mm: Annotated[float, Form(description="以 p_i 为球心的初筛半径（mm）")] = 8.0,
@@ -260,7 +276,9 @@ def create_app(model_dir: str, device: str) -> FastAPI:
             led_prompt,
             enable_marker_p1,
             sam3_api_url,
+            sam3_marker_api_url,
             threshold,
+            sam3_marker_threshold,
             mask_threshold,
             timeout_s,
             float(radius_mm),
@@ -279,7 +297,9 @@ def create_app(model_dir: str, device: str) -> FastAPI:
         led_prompt: Annotated[str | None, Form()] = None,
         enable_marker_p1: Annotated[bool, Form()] = True,
         sam3_api_url: Annotated[str | None, Form()] = None,
+        sam3_marker_api_url: Annotated[str | None, Form()] = None,
         threshold: Annotated[float | None, Form()] = None,
+        sam3_marker_threshold: Annotated[float | None, Form()] = None,
         mask_threshold: Annotated[float | None, Form()] = None,
         timeout_s: Annotated[float | None, Form()] = None,
         radius_mm: Annotated[float, Form()] = 8.0,
@@ -297,7 +317,9 @@ def create_app(model_dir: str, device: str) -> FastAPI:
             led_prompt,
             enable_marker_p1,
             sam3_api_url,
+            sam3_marker_api_url,
             threshold,
+            sam3_marker_threshold,
             mask_threshold,
             timeout_s,
             float(radius_mm),

@@ -41,6 +41,7 @@ bash start.sh restart    # 默认 :19000；可用 DEVICE=cpu / API_PORT=...
 
 2. **抓取 位姿估计 Tab**（原 SAM3 分割，`55236af`）  
    - 传感器深度实例分色点云；**各孔 ABCD/abcd 8 点联合定面板法向 Z**，孔心 3D **双平行线联合拟合**定水平 X，LED 圆心/深度定 **P1**  
+   - 料盘用 **微调 SAM3**（默认 `:18122`，threshold `0.41`）；孔洞 / LED 用 **官方 SAM3**（默认 `:18124`，threshold `0.09`）  
    - 数值 `frame=camera`；3D 预览 `preview_frame=glb_y_up`（Y 翻转）  
    - 每实例：`p_i`（Z 最小）→ 预览 P1 / 实例点
 

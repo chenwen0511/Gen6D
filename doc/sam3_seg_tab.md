@@ -40,9 +40,9 @@ curl -X POST "http://127.0.0.1:19000/api/v1/infer/grasp" \
 ```
 RGB + 传感器深度 + camera.json
         │
-        ├─► SAM3（实例提示词）──► 实例 mask / bbox / id_map
+        ├─► 微调 SAM3（料盘实例提示词，默认 :18122）──► 实例 mask / bbox / id_map
         │
-        ├─► SAM3（孔洞提示词 + LED 提示词，可选）
+        ├─► 官方 SAM3（孔洞 + LED 提示词，默认 :18124，threshold 0.09，可选）
         │         │
         │         ▼
         │   孔心 3D 双平行线联合拟合定水平 X + 各孔 ABCD/abcd(旋45°) 8 点联合拟合法向 Z
@@ -154,7 +154,7 @@ RGB + 传感器深度 + camera.json
 | `src/depth/pointcloud.py` | 实例点云、`find_instance_qi_from_pi_sphere`、`apply_qi_z_from_p1`、P1-X 筛选 |
 | `src/grasp/sam3.py` | SAM3 客户端、`render_sam3_mask_bbox_previews` |
 | `prompt/shelf_holes.txt` / `prompt/blue_led_marker.txt` | 默认孔洞 / LED 提示词 |
-| `config/grasp_config.json` | `sam3` / `grasp` / `place` / `pem` 默认配置 |
+| `config/grasp_config.json` | `sam3`（料盘微调）/ `grasp` / `place`（孔洞/LED 官方 `sam3_api_url`、`sam3_threshold=0.09`）/ `pem` |
 
 ---
 

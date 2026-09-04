@@ -42,6 +42,7 @@ from src.grasp.settings import (
     DEFAULT_PLACE_HOLE_PROMPT,
     DEFAULT_PLACE_LED_PROMPT,
     DEFAULT_PLACE_MARKER_PROMPT,
+    DEFAULT_PLACE_SAM3_API_URL,
     DEFAULT_PLACE_SAM3_MASK_THRESHOLD,
     DEFAULT_PLACE_SAM3_THRESHOLD,
 )
@@ -145,7 +146,9 @@ def infer_grasp(
     led_prompt: Optional[str] = None,
     enable_marker_p1: bool = True,
     api_url: Optional[str] = None,
+    marker_api_url: Optional[str] = None,
     threshold: Optional[float] = None,
+    marker_threshold: Optional[float] = None,
     mask_threshold: Optional[float] = None,
     timeout_s: Optional[float] = None,
     radius_mm: float = 8.0,
@@ -158,6 +161,8 @@ def infer_grasp(
     :param sensor_depth: 传感器深度，单位 mm，形状 (H, W)
     :param intrinsics: 3×3 cam_K
     :param z_offset_from_p1_mm: 有 P1 时 q.z = P1.z + 该值；默认 -30（往后退 30mm）
+    :param api_url: 料盘实例分割 SAM3（微调）
+    :param marker_api_url: 孔洞 / LED 标记位 SAM3（官方）
     """
     t0 = time.perf_counter()
     prompt_text = (prompt or DEFAULT_SAM3_PROMPT or "").strip()
@@ -179,6 +184,7 @@ def infer_grasp(
         image_for_seg = rgb.convert("RGB")
 
     sam_api = (api_url or "").strip() or DEFAULT_SAM3_API_URL
+    marker_api = (marker_api_url or "").strip() or DEFAULT_PLACE_SAM3_API_URL
     thr = float(threshold if threshold is not None else DEFAULT_SAM3_THRESHOLD)
     mask_thr = float(mask_threshold if mask_threshold is not None else DEFAULT_SAM3_MASK_THRESHOLD)
     timeout = float(timeout_s if timeout_s is not None else DEFAULT_SAM3_TIMEOUT_S)
@@ -242,6 +248,7 @@ def infer_grasp(
         ).strip()
         marker_payload["hole_prompt"] = hole_prompt_text
         marker_payload["led_prompt"] = led_prompt_text
+        marker_payload["sam3_api"] = marker_api
         try:
             p1_pose, marker_payload, p1_vis, abcd_zoom = infer_p1_from_shelf_panel(
                 image_for_seg,
@@ -250,8 +257,12 @@ def infer_grasp(
                 (depth_w, depth_h),
                 hole_prompt=hole_prompt_text,
                 led_prompt=led_prompt_text,
-                api_url=sam_api,
-                threshold=float(thr if thr is not None else DEFAULT_PLACE_SAM3_THRESHOLD),
+                api_url=marker_api,
+                threshold=float(
+                    marker_threshold
+                    if marker_threshold is not None
+                    else DEFAULT_PLACE_SAM3_THRESHOLD
+                ),
                 mask_threshold=float(
                     mask_thr if mask_thr is not None else DEFAULT_PLACE_SAM3_MASK_THRESHOLD
                 ),
@@ -322,7 +333,11 @@ def infer_grasp(
             instance_qi=[],
             instance_qi_all=qi_all,
             image_size=[depth_w, depth_h],
-            extras={"instance_prompt": prompt_text, "sam3_api": sam_api},
+            extras={
+                "instance_prompt": prompt_text,
+                "sam3_api": sam_api,
+                "sam3_marker_api": marker_api,
+            },
         )
 
     q = qi_list[0]
@@ -366,6 +381,7 @@ def infer_grasp(
         extras={
             "instance_prompt": prompt_text,
             "sam3_api": sam_api,
+            "sam3_marker_api": marker_api,
             "threshold": thr,
             "mask_threshold": mask_thr,
             "radius_mm": float(radius_mm),

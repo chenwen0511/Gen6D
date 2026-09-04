@@ -6,7 +6,7 @@
     "timeout_s": 120
   },
   "sam3": {
-    "api_url": "http://127.0.0.1:18003/infer",
+    "api_url": "http://127.0.0.1:18122/infer",
     "prompt": "Plastic Reel Connected With Tape",
     "threshold": 0.41,
     "mask_threshold": 0.5,
@@ -29,10 +29,11 @@
     "z_offset_from_p1_mm": -30
   },
   "place": {
-    "hole_prompt": "All small circular through holes on the gray flat metal shelf panel in horizontal",
+    "hole_prompt": "Circular mounting holes on the upper gray metal shelf panel",
     "led_prompt": "Small glowing circular blue LED indicator light on the gray metal shelf plate",
     "marker_prompt": "Small glowing circular blue LED indicator light on the gray metal shelf plate",
-    "sam3_threshold": 0.41,
+    "sam3_api_url": "http://127.0.0.1:18124/infer",
+    "sam3_threshold": 0.09,
     "sam3_mask_threshold": 0.5,
     "sam3_timeout_s": 300,
     "depth_offset_mm": 100,

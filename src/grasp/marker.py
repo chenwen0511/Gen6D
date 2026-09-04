@@ -666,6 +666,7 @@ def infer_p1_from_shelf_panel(
     payload: Dict[str, Any] = {
         "hole_prompt": hole_prompt,
         "led_prompt": led_prompt,
+        "sam3_api": api_url,
     }
     hole_masks: List[np.ndarray] = []
     led_mask: Optional[np.ndarray] = None
@@ -711,6 +712,10 @@ def infer_p1_from_shelf_panel(
     if not led_result.detections:
         payload["success"] = False
         payload["message"] = "SAM3 未检测到蓝色 LED 标记"
+        print(
+            f"[sam3_seg] p1 failed holes={payload['holes']['num_detections']} "
+            f"led={led_result.num_detections} message={payload['message']!r}"
+        )
         return None, payload, None, None
 
     led_det, led_selection = select_blue_led_detection(
@@ -720,6 +725,10 @@ def infer_p1_from_shelf_panel(
     if led_det is None:
         payload["success"] = False
         payload["message"] = "未能选出蓝色 LED 标记"
+        print(
+            f"[sam3_seg] p1 failed holes={payload['holes']['num_detections']} "
+            f"led={led_result.num_detections} message={payload['message']!r}"
+        )
         return None, payload, None, None
 
     led_mask = _decode_detection_mask(led_det, image_size)
@@ -730,4 +739,9 @@ def infer_p1_from_shelf_panel(
     payload["p1"] = p1.to_dict()
     payload["p1_meta"] = p1_meta
     payload["num_holes"] = len(hole_masks)
+    print(
+        f"[sam3_seg] p1 ok holes={len(hole_masks)} "
+        f"led={led_result.num_detections} "
+        f"p1_mm={p1.position_mm.round(1).tolist()}"
+    )
     return p1, payload, vis, abcd_zoom
