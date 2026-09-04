@@ -1556,6 +1556,87 @@ def offset_pose_coplanar(
     return Pose6D(position_m=pose.position_m + delta, rotation=pose.rotation.copy())
 
 
+def classify_p1_hole_row(
+    p1: Pose6D,
+    hole_line: Optional[Dict[str, Any]],
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    判断 LED/P1 更靠近上排孔线还是下排孔线。
+
+    用 P1 到各排拟合直线（origin + 水平方向）的垂直距离；相机 Y 更小的排为 top。
+    """
+    hole_line = hole_line or {}
+    rows = [r for r in (hole_line.get("rows") or []) if isinstance(r, dict)]
+    direction = np.asarray(
+        hole_line.get("horizontal_camera") or [1.0, 0.0, 0.0], dtype=np.float64
+    )
+    dn = float(np.linalg.norm(direction))
+    if dn > 1e-12:
+        direction = direction / dn
+    else:
+        direction = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+
+    p = np.asarray(p1.position_m, dtype=np.float64).reshape(3)
+
+    def _dist_mm(row: Dict[str, Any]) -> float:
+        origin = np.asarray(row.get("origin_m") or p, dtype=np.float64).reshape(3)
+        delta = p - origin
+        perp = delta - float(np.dot(delta, direction)) * direction
+        return float(np.linalg.norm(perp) * 1000.0)
+
+    labeled = [r for r in rows if r.get("label") in ("top", "bottom")]
+    if not labeled:
+        return "bottom", {
+            "reason": "no_top_bottom_rows",
+            "fallback": "bottom",
+            "row_count": len(rows),
+        }
+
+    scored = []
+    for row in labeled:
+        scored.append(
+            {
+                "label": str(row.get("label")),
+                "dist_mm": round(_dist_mm(row), 2),
+                "origin_m": row.get("origin_m"),
+            }
+        )
+    scored.sort(key=lambda x: float(x["dist_mm"]))
+    chosen = str(scored[0]["label"])
+    return chosen, {
+        "reason": "nearest_row_line",
+        "chosen": chosen,
+        "candidates": scored,
+    }
+
+
+def compute_q_from_p1_hole_row(
+    p1: Pose6D,
+    hole_line: Optional[Dict[str, Any]],
+    *,
+    top_up_mm: float = 24.5,
+    bottom_up_mm: float = 30.0,
+) -> Tuple[Pose6D, Dict[str, Any]]:
+    """
+    LED 在上排孔线 → P1 沿局部 +Y（图像向上）平移 ``top_up_mm``；
+    在下排 → 平移 ``bottom_up_mm``。姿态与 P1 相同。
+    """
+    row_label, classify_meta = classify_p1_hole_row(p1, hole_line)
+    up_mm = float(top_up_mm) if row_label == "top" else float(bottom_up_mm)
+    y_ax = marker_height_axis(p1.rotation)
+    position = p1.position_m + (up_mm / 1000.0) * y_ax
+    q = Pose6D(position_m=position, rotation=p1.rotation.copy())
+    meta = {
+        "row": row_label,
+        "up_mm": round(up_mm, 2),
+        "axis": "p1_local_+Y (camera up)",
+        "p1_mm": p1.position_mm.round(2).tolist(),
+        "q_mm": q.position_mm.round(2).tolist(),
+        "classify": classify_meta,
+    }
+    return q, meta
+
+
 def decompose_delta_in_yz_plane(
     rotation: np.ndarray,
     delta_m: np.ndarray,

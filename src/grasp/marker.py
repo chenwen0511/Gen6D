@@ -604,6 +604,90 @@ def render_p1_and_pi_preview(
     return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
 
 
+def render_p1_q_offset_preview(
+    rgb: Image.Image,
+    camera: CameraIntrinsics,
+    *,
+    p1: Optional[Pose6D],
+    q: Optional[Pose6D],
+    hole_line: Optional[Dict[str, Any]] = None,
+    row_label: str = "",
+    offset_mm: float = 0.0,
+) -> Image.Image:
+    """P1、孔线、以及沿高度上移后的抓取点 Q。"""
+    bgr = cv2.cvtColor(np.array(rgb.convert("RGB")), cv2.COLOR_RGB2BGR)
+    legend = ["shelf P1 → Q (up along +Y)"]
+    hole_line = hole_line or {}
+    rows = hole_line.get("rows") or []
+    line_colors = ((0, 255, 255), (0, 200, 255))
+    for i, row in enumerate(rows):
+        left_uv = row.get("fit_left_uv") or row.get("left_uv")
+        right_uv = row.get("fit_right_uv") or row.get("right_uv")
+        if not left_uv or not right_uv:
+            continue
+        p0 = (int(round(left_uv[0])), int(round(left_uv[1])))
+        p1_uv_line = (int(round(right_uv[0])), int(round(right_uv[1])))
+        color = line_colors[i % len(line_colors)]
+        cv2.line(bgr, p0, p1_uv_line, color, 2, cv2.LINE_AA)
+        label = row.get("label") or f"H{i + 1}"
+        cv2.putText(
+            bgr,
+            f"holes H/{label}",
+            (p0[0], p0[1] - 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+
+    p1_uv = None
+    if p1 is not None:
+        p1_uv = project_point(p1.position_m, camera)
+        if p1_uv:
+            cv2.drawMarker(
+                bgr, p1_uv, (0, 220, 255), markerType=cv2.MARKER_CROSS, markerSize=26, thickness=3
+            )
+            cv2.circle(bgr, p1_uv, 12, (0, 220, 255), 2, cv2.LINE_AA)
+            cv2.putText(
+                bgr, "P1", (p1_uv[0] + 12, p1_uv[1] - 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 220, 255), 2, cv2.LINE_AA,
+            )
+            _draw_axes(bgr, p1, camera, scale_m=0.05)
+        legend.append(f"P1 mm: {p1.position_mm.round(1).tolist()}")
+
+    if q is not None:
+        q_uv = project_point(q.position_m, camera)
+        if q_uv:
+            if p1_uv is not None:
+                cv2.line(bgr, p1_uv, q_uv, (0, 0, 255), 2, cv2.LINE_AA)
+                mid = ((p1_uv[0] + q_uv[0]) // 2, (p1_uv[1] + q_uv[1]) // 2)
+                cv2.putText(
+                    bgr,
+                    f"up {offset_mm:g}mm ({row_label or '?'})",
+                    (mid[0] + 8, mid[1] - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (0, 0, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+            cv2.drawMarker(
+                bgr, q_uv, (255, 0, 255), markerType=cv2.MARKER_TILTED_CROSS, markerSize=24, thickness=3
+            )
+            cv2.circle(bgr, q_uv, 12, (255, 0, 255), 2, cv2.LINE_AA)
+            cv2.putText(
+                bgr, "Q", (q_uv[0] + 12, q_uv[1] + 18),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 0, 255), 2, cv2.LINE_AA,
+            )
+            _draw_axes(bgr, q, camera, scale_m=0.06)
+        legend.append(f"Q mm: {q.position_mm.round(1).tolist()}")
+        legend.append(f"row={row_label}  up={offset_mm:g}mm")
+
+    _draw_legend(bgr, legend)
+    return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+
+
 def estimate_p1_from_shelf_markers(
     rgb: Image.Image,
     led_mask: np.ndarray,

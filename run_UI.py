@@ -19,6 +19,7 @@ from src.depth.service import (
 from src.depth.pointcloud import DEFAULT_RGB_SHIFT_XY
 from src.grasp.ui import build_point_sam_pem_tab
 from src.grasp.sam3_tab import build_sam3_seg_tab
+from src.grasp.shelf_q_tab import build_shelf_q_tab
 
 
 def parse_camera_json_file(file_path: str | None) -> tuple:
@@ -217,6 +218,7 @@ def build_ui(service: DepthService) -> gr.Blocks:
                 )
 
             build_sam3_seg_tab(service)
+            build_shelf_q_tab(service)
             build_point_sam_pem_tab(service)
 
     return demo

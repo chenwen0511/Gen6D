@@ -170,3 +170,20 @@ RGB + 传感器深度 + camera.json
 两者可共用同一组 RGB / depth / camera 样例做对照。
 
 相关远端 API 说明见 [sam6d_rest_api.md](sam6d_rest_api.md)、[pem.md](pem.md)。
+
+---
+
+## 页签：抓取 孔线 Q（仅 UI）
+
+对应 Gradio 页签 **「抓取 孔线 Q」**（`src/grasp/shelf_q_tab.py`）。**没有** REST 接口。
+
+P1 与「抓取 位姿估计」相同（官方 SAM3 孔洞双平行线 + LED）。随后按 LED 到上下排孔线的 3D 垂直距离分类：
+
+| LED 更近 | 沿 P1 局部 +Y（图像向上）平移 | 配置键 |
+|----------|-------------------------------|--------|
+| `holes H/top` | **24.5 mm** | `grasp.led_top_up_mm` |
+| `holes H/bottom` | **30 mm** | `grasp.led_bottom_up_mm` |
+
+得到抓取点 **Q**：姿态与 P1 相同。点云黄球 = P1，品红球 = Q。
+
+此 Q **不是** 料盘 `q_i`；实例分割仅用于点云分色。P1 失败则无 Q。

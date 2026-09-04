@@ -24,6 +24,7 @@ bash start.sh restart    # 默认 :19000；可用 DEVICE=cpu / API_PORT=...
 |------|------|
 | **深度估计** | 传感器深度 + DA3 估计 + 融合深度可视化 / 点云；点云上色支持 RGB 偏移（默认 dx=-45） |
 | **抓取 位姿估计** | 实例分割 + 标记位 P1 → 抓取点 `q`（`xyzrxryrz`） |
+| **抓取 孔线 Q** | 同上 P1；按 LED 近上/下排孔线沿局部 +Y 上移 24.5/30mm 得 `Q` |
 | **融合深度 + SAM-6D** | 融合或传感器深度 → SAM-6D（`seg_backend=sam3`）6D 位姿 |
 
 详细流程见 [doc/sam3_seg_tab.md](doc/sam3_seg_tab.md)。
@@ -49,6 +50,11 @@ bash start.sh restart    # 默认 :19000；可用 DEVICE=cpu / API_PORT=...
    - `p_i` 后先 **球半径 8mm** 初筛，再 **相机 y±2mm** 得 **`q_i`（xy 均值）**；有 P1 时 **`q.z = P1.z − 30mm`**（`grasp.z_offset_from_p1_mm`，沿相机 Z 往后退）；按 P1-X `|dx|` **只保留最近 1 个** 作为夹爪抓取点  
    - UI JSON：`[x,y,z,rx,ry,rz]`（xyz=mm，姿态=°）；含 `frame` / `preview_frame`  
    - 实例分割预览拆成 **mask** / **bbox** 两张图（SAM3 Tab 与 SAM-6D ISM 均已支持）
+
+4. **抓取 孔线 Q**（仅 UI，无 REST）  
+   - 页签「抓取 孔线 Q」：P1 算法同「抓取 位姿估计」  
+   - LED 近 **上排** `holes H/top` → 沿 P1 局部 +Y 上移 **24.5 mm**；近 **下排** → **30 mm**  
+   - 配置：`grasp.led_top_up_mm` / `grasp.led_bottom_up_mm`；点云黄球 P1、品红球 Q
 
 ---
 
@@ -147,7 +153,7 @@ D_metric_est = s · D_est + t
 
 | 文档 | 说明 |
 |------|------|
-| [doc/sam3_seg_tab.md](doc/sam3_seg_tab.md) | **抓取 位姿估计** Tab：P1 / p_i / q_i / 抓取位姿 |
+| [doc/sam3_seg_tab.md](doc/sam3_seg_tab.md) | **抓取 位姿估计** Tab：P1 / p_i / q_i；另含 **抓取 孔线 Q** |
 | [doc/grasp_api.md](doc/grasp_api.md) | **REST** `POST /api/v1/infer/grasp`（返回 `xyzrxryrz` + 可视化图） |
 | [doc/sam6d_rest_api.md](doc/sam6d_rest_api.md) | SAM-6D HTTP 服务 REST |
 | [doc/pem.md](doc/pem.md) | PEM / SAM-6D 集成说明 |
